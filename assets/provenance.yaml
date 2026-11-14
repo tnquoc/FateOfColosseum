@@ -1,0 +1,40 @@
+# Where each file in assets/ and vendor/ came from, one entry per file. The field names are the
+# provenance record's, so the entries carry over when the game grows.
+# - path: assets/hit.wav      # relative to this game's folder
+#   origin: ai                # ai | bought | cc0 | you | outsourced | template | plugin | licensed | code | unknown
+#   tool: "what made or fetched it: the generator, or the script for code"
+#   model: "the model ID, when a model made it or an AI wrote its code"
+#   source: {vendor: "who made or sold it", product: "its name", url: "where from"}   # a download
+#   licence: {id: CC0-1.0}    # a download: the SPDX id where one exists
+#   date: 2026-01-31
+#   ships: true               # false for a file only the build uses
+#   placeholder: true         # until it is replaced; leave the line out otherwise
+- path: vendor/three.js
+  origin: licensed
+  source: {product: three.js, version: "0.186.1", url: https://threejs.org}
+  licence: {id: MIT}
+  tool: "esbuild 0.28.2, one plain script for play from a file, with GLTFLoader and SkeletonUtils from three/examples"
+  date: 2026-11-13
+  ships: true
+- path: assets/crowd-bed.mp3
+  origin: cc0
+  source: {vendor: "itmightgetloud (Sound Of Sankt Pauli)", product: "Millerntor Stadium Crowd Reaction Mood Waves 01", url: https://freesound.org/people/itmightgetloud/sounds/829456/}
+  licence: {id: CC0-1.0}
+  tool: "copied from the user's SpinTopShowdown project (sounds/crowd-bed.mp3: a 2:30-3:02 cut, looped with a 3 s crossfade, mono, loudnorm -23 LUFS with ffmpeg)"
+  date: 2026-11-13
+  ships: false
+- path: assets/crowd-bed.js
+  origin: code
+  tool: "python base64 of assets/crowd-bed.mp3, so a file:// page can decode it"
+  model: "claude-opus-5-5"
+  licence: {id: CC0-1.0}
+  date: 2026-11-13
+  ships: true
+- path: assets/kaykit-models.js
+  origin: cc0
+  source: {vendor: "Kay Lousberg", product: "KayKit Character Pack: Adventurers 1.0", url: https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0}
+  licence: {id: CC0-1.0}
+  tool: "Knight, Barbarian, Rogue, Rogue_Hooded and Mage .glb, pruned by a python script (Knight keeps 52 of its animations, the others keep only mesh and skin), then base64 so a file:// page can parse them"
+  model: "claude-opus-5-5"
+  date: 2026-11-14
+  ships: true
