@@ -28,6 +28,8 @@
 
 // ---- Built to be checked ----------------------------------------------------------------
 const params = new URLSearchParams(location.search);
+const DEBUG = params.get('debug') === '1'; // ?debug=1: K wins the fight at once, [ and ] jump fights (Shift: 5), ?debug=1&fight=N starts at fight N
+let dbgKill = false, dbgJump = 0; // in debug mode: K was pressed; fights to jump by ([ ], Shift read as the key goes down)
 const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
 const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
 const W = 1280, H = 720;        // logical size of the HUD
@@ -120,6 +122,8 @@ const down = new Set(), hit = new Set();
 const pressed = code => hit.has(code); // true for one step after the key goes down
 addEventListener('keydown', e => {
   startAudio();
+  if (DEBUG && e.code === 'KeyK') { if (!e.repeat) dbgKill = true; e.preventDefault(); return; }
+  if (DEBUG && (e.code === 'BracketLeft' || e.code === 'BracketRight')) { if (!e.repeat) dbgJump += (e.code === 'BracketRight' ? 1 : -1) * (e.shiftKey ? 5 : 1); return; }
   if (!e.repeat) { down.add(e.code); hit.add(e.code); }
   if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
 });
@@ -368,6 +372,13 @@ const SFX = {
   wave: () => { noise(0.8, 0.4, 'bandpass', 300, 1400, 0.8, 0.12, 0, true); noise(0.5, 0.2, 'highpass', 2000, 4000, 0.7, 0.2, 0.25); tone(90, 0.6, 'sine', 0.3, 50); },
   quake: () => { tone(42, 0.7, 'sawtooth', 0.3, 28, 0.01, 300, 0, true); noise(0.6, 0.45, 'lowpass', 700, 120, 1, 0.01, 0, true); for (let i = 0; i < 5; i++) noise(0.07, 0.2, 'lowpass', 1600, 400, 1, 0.002, 0.05 + i * 0.06); },
   shadow: () => { noise(0.35, 0.3, 'bandpass', 2600, 500, 2, 0.04); tone(330, 0.35, 'sine', 0.1, 110, 0.02); tone(165, 0.4, 'triangle', 0.08, 80, 0.05, 0, 0.1); },
+  whisper: () => { // voices in the tower's walls: breathy formants that slide, under a low drone
+    for (let i = 0; i < 6; i++) { const f = 900 + deco() * 2200; noise(0.3 + deco() * 0.45, 0.06, 'bandpass', f, f * (0.6 + deco() * 0.8), 9, 0.08, i * 0.2 + deco() * 0.1, true); }
+    tone(58, 3.2, 'sawtooth', 0.03, 52, 0.8, 180, 0, true);
+  },
+  shriek: () => { tone(880, 0.6, 'sawtooth', 0.05, 1500, 0.02, 2600, 0, true); tone(1320, 0.5, 'square', 0.02, 2100, 0.03, 3000, 0.05, true); noise(0.5, 0.1, 'bandpass', 2800, 1800, 3, 0.02, 0, true); },
+  laugh: () => { for (let i = 0; i < 5; i++) tone(150 - i * 9, 0.16, 'sawtooth', 0.09, 120 - i * 9, 0.01, 700, i * 0.2, true); tone(60, 1.4, 'sine', 0.2, 40, 0.05, 0, 0, true); },
+  heart: () => { tone(58, 0.16, 'sine', 0.55, 40); tone(52, 0.2, 'sine', 0.42, 36, 0.005, 0, 0.2); },
   ignarCharge: () => { noise(0.45, 0.3, 'bandpass', 300, 1800, 1.2, 0.3); tone(80, 0.45, 'sawtooth', 0.1, 160, 0.2, 500); },
   ignar: () => { // a roar of fire: a low boom, a rushing whoosh, crackles
     tone(70, 0.9, 'sine', 0.7, 30, 0.005, 0, 0, true); noise(0.9, 0.55, 'lowpass', 2600, 240, 0.6, 0.01, 0, true);
@@ -608,7 +619,8 @@ function buildArena() {
     scene3.add(g);
   }
   // the five gods, statues on the rim; Ignar's brazier is lit, the others wait
-  ['ignar', 'thalassa', 'fulmen', 'terrak', 'nox'].forEach((god, i) => statue(GATE_A + i * TAU / 5, god));
+  // six plinths, five gods: the sixth, Sol's, stands empty by the gate (the story's first clue)
+  ['ignar', null, 'thalassa', 'fulmen', 'terrak', 'nox'].forEach((god, i) => god ? statue(GATE_A + i * TAU / 6, god) : emptyPlinth(GATE_A + i * TAU / 6));
   // braziers on the podium cap
   const bronzeM = mat(0x7A5A34), flameO = new THREE.MeshBasicMaterial({ color: 0xE0782E }), flameI = new THREE.MeshBasicMaterial({ color: 0xF4B860 });
   const spots = [GATE_A - 0.38, GATE_A + 0.38, 0.36, -0.36 + Math.PI, Math.PI + 0.36, Math.PI / 2 - 0.9, Math.PI / 2 + 0.9, Math.PI / 2];
@@ -624,17 +636,21 @@ function buildArena() {
   });
   buildCrowd(benches);
 }
-/** Each chapter its own light: Hố Cát's grey noon, Kinh Đô's gold afternoon, Colossus's white glare, the last fights at a red dusk. */
+/** Each chapter its own light: Hố Cát's grey noon, Kinh Đô by night, Colossus's white glare, the garden at a red dusk, the eclipse. */
 const ARENA_LOOK = [
-  { sky: 0xffffff, fog: 0xB4B2AA, bg: PAL.sky, sun: 0xFFE7C8, sunI: 1.9, hemi: 0xD2DAE2, hemiI: 1.8, floor: 0xffffff },
-  { sky: 0xF4D8A6, fog: 0xC8B48E, bg: 0xC8A878, sun: 0xFFD49A, sunI: 2.0, hemi: 0xEAD6B0, hemiI: 1.7, floor: 0xF2DEC2 },
+  { sky: 0xffffff, fog: 0xB4B2AA, bg: PAL.sky, sun: 0xFFE7C8, sunI: 1.9, hemi: 0xD2DAE2, hemiI: 1.8, floor: 0xE6D2BA }, // Hố Cát: a browner pit
+  { sky: 0x34405E, fog: 0x1E2436, bg: 0x141A2A, sun: 0xA8B8E8, sunI: 0.55, hemi: 0x6070A0, hemiI: 0.7, floor: 0xC8C0CC }, // Kinh Đô by night
   { sky: 0xE6F0FC, fog: 0xC8CED6, bg: 0xA8B8C8, sun: 0xFFFFFF, sunI: 2.2, hemi: 0xE6EEF6, hemiI: 1.9, floor: 0xF6F2EC },
-  { sky: 0xEA9A76, fog: 0x8A5A4A, bg: 0x7A4A44, sun: 0xFF9A6A, sunI: 1.75, hemi: 0xDAA08E, hemiI: 1.5, floor: 0xDCAA92 },
+  { sky: 0xEA9A76, fog: 0x8A5A4A, bg: 0x7A4A44, sun: 0xFF9A6A, sunI: 1.75, hemi: 0xDAA08E, hemiI: 1.5, floor: 0xDCAA92 }, // the Emperor's garden at dusk
+  { sky: 0x3A2A40, fog: 0x24182C, bg: 0x160E1C, sun: 0xFFB27A, sunI: 1.1, hemi: 0x6A4E7E, hemiI: 0.95, floor: 0xB09AA0 }, // Nhật Thực: the sun going out
 ];
 let arenaCh = 1;
+/** The ring the fighters stay inside: the arena's, or on the tower's bridge what is left of it. */
+let ringR = 0;
+function AR() { return ringR || tune.arena_radius; }
 function applyArena(ch) {
   if (ch === arenaCh) return; arenaCh = ch;
-  const L = ARENA_LOOK[clamp(ch, 1, 4) - 1];
+  const L = ARENA_LOOK[clamp(ch, 1, 5) - 1];
   if (skyMesh) skyMesh.material.color.set(L.sky);
   scene3.fog.color.set(L.fog); scene3.background.set(L.bg);
   sun.color.set(L.sun); sun.intensity = L.sunI; hemi.color.set(L.hemi); hemi.intensity = L.hemiI;
@@ -701,6 +717,18 @@ function statue(a, god) {
   } else { // Nox: a crescent
     const c = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.08, 5, 10, Math.PI * 1.3), st2); c.position.set(hx, hy + 0.6, 0.1); c.rotation.z = -0.6; g.add(c);
   }
+  const r = RIM - 0.5;
+  g.position.set(Math.cos(a) * r, RIM_Y, Math.sin(a) * r); g.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a)); g.scale.setScalar(1.55);
+  scene3.add(g);
+}
+/** Sol's plinth: the god knocked off it long ago, two broken feet and a chiselled sun left on the stone. */
+function emptyPlinth(a) {
+  const g = new THREE.Group(), st = mat(0xC8C0AE), st2 = mat(0xA9A08C), scar = mat(0x8A8272);
+  g.add(at(box(1.7, 1.1, 1.7, st2), 0, 0.55, 0));
+  for (const sx of [-0.3, 0.3]) { const f = at(cyl(0.2, 0.26, 0.45 + (sx > 0 ? 0.2 : 0), 7, st), sx, 1.3 + (sx > 0 ? 0.1 : 0), 0.05); f.rotation.z = sx * 0.2; g.add(f); }
+  const sun = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.34, 12), scar); sun.position.set(0, 0.6, 0.86); g.add(sun);
+  for (let j = 0; j < 8; j++) { const r = box(0.05, 0.16, 0.02, scar), q = j / 8 * TAU; r.position.set(Math.sin(q) * 0.46, 0.6 + Math.cos(q) * 0.46, 0.86); r.rotation.z = -q; g.add(r); }
+  for (let j = 0; j < 5; j++) g.add(at(ico(0.1 + hash2(j, 7) * 0.08, 0, st), (hash2(j, 1) - 0.5) * 1.4, 1.14, (hash2(2, j) - 0.5) * 1.4)); // rubble
   const r = RIM - 0.5;
   g.position.set(Math.cos(a) * r, RIM_Y, Math.sin(a) * r); g.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a)); g.scale.setScalar(1.55);
   scene3.add(g);
@@ -1563,6 +1591,7 @@ function modelTrail(fig, f) {
   tr.visible = true;
 }
 function makeFigure(look) {
+  if (look.startsWith('idol_')) return makeIdol(look.slice(5));
   if (look === 'lion') return makeLion();
   if (look === 'elephant') return makeElephant();
   if (look === 'chariot') return makeChariot();
@@ -1969,72 +1998,103 @@ Object.assign(KIND.golden.moves, { quake: () => KIND.grull.moves.quake(), storm:
   wave: () => KIND.admiral.moves.tide() });
 KIND.golden.patterns.push({ m: ['quake', 'cut1'], w: 1.3, enraged: true }, { m: ['storm', 'storm'], w: 1.3, enraged: true }, { m: ['blink', 'cut1'], w: 1.3, enraged: true, minDist: 2.2 },
   { m: ['wave'], w: 1.1, enraged: true, maxDist: 3.5 });
+// Tháp Sinh Tử: the five gods' idols, corrupted (only the god's own spell breaks one), and Valerian, the sorcerer, himself
+for (const g of ['terrak', 'fulmen', 'ignar', 'thalassa', 'nox']) KIND['idol_' + g] = { name: 'TƯỢNG ' + g.toUpperCase() + ' BỊ THA HOÁ', r: 0.75, hp: () => tune.idol_hp,
+  speed: () => 0, pref: 99, think: () => tune.idol_think * Math.pow(tune.idol_rage, state.blade || 0), punish: () => 0.4, look: 'idol_' + g, idol: g, headY: 2.6,
+  moves: { cast: () => ({ windup: tune.idol_windup, active: 0.2, recover: 0.6, dmg: tune.idol_dmg, range: 99, arc: 360, red: true, anim: 'slam', aoe: 'target', aoeR: tune.idol_aoe_r,
+    fx: { terrak: 'terrak', fulmen: 'fulmen', ignar: 'fire', thalassa: 'water', nox: 'shadow' }[g], knock: 4 }) },
+  patterns: [{ m: ['cast'], w: 1 }] };
+KIND.sorcerer = { name: 'VALERIAN · PHÁP SƯ BÓNG TỐI', r: 0.55, boss: true, dark: true, hp: () => tune.sorcerer_hp, speed: () => tune.sorcerer_speed, pref: 3.0,
+  think: () => tune.sorcerer_think, punish: () => tune.sorcerer_recover, look: 'emperor', phaseCut: 'valPhase2',
+  enrageAt: () => tune.sorcerer_phase2, enrageSpeed: () => 1.15, enrageWind: () => 0.85, enrageSay: 'Hắn gọi bóng ma lên cầu, và vành cầu sắp sụp! Dọn bóng ma, rồi phản đòn mà nạp ánh sáng!',
+  moves: {
+    claw: () => ({ windup: tune.sorcerer_claw_windup, active: 0.12, recover: 0.3, dmg: tune.sorcerer_claw_dmg, range: 2.0, arc: 120, lunge: 0.7, anim: 'slash1' }),
+    claw2: () => ({ windup: tune.sorcerer_claw_windup * 0.8, active: 0.12, recover: 0.3, dmg: tune.sorcerer_claw_dmg, range: 2.0, arc: 120, lunge: 0.6, anim: 'slash2' }),
+    bolt: () => ({ windup: tune.sorcerer_bolt_windup, active: 0.1, recover: 0.45, dmg: tune.sorcerer_bolt_dmg, range: 14, arc: 40, ranged: true, orb: true, anim: 'thrust' }),
+    nova: () => ({ windup: tune.sorcerer_nova_windup, active: 0.3, recover: 0.6, dmg: tune.sorcerer_nova_dmg, range: tune.sorcerer_nova_r, arc: 360, red: true, anim: 'slam', aoe: 'self', aoeR: tune.sorcerer_nova_r, fx: 'shadow', knock: 6 }),
+    pillar: () => ({ windup: tune.sorcerer_pillar_windup, active: 0.25, recover: 0.5, dmg: tune.sorcerer_pillar_dmg, range: 99, arc: 360, red: true, anim: 'heavy', aoe: 'target', aoeR: tune.sorcerer_pillar_r, fx: 'shadow', knock: 4 }),
+    blink: () => KIND.praetor.moves.blink(),
+    quake: () => KIND.grull.moves.quake(), storm: () => KIND.sabina.moves.storm(), flame: () => KIND.golden.moves.flame(), wave: () => KIND.admiral.moves.tide(),
+  },
+  // p3: only once he is under sorcerer_phase3 of his health
+  patterns: [{ m: ['bolt'], w: 2.2, minDist: 3 }, { m: ['bolt', 'bolt'], w: 1.4, minDist: 3.5 }, { m: ['claw', 'claw2'], w: 2.4, maxDist: 3 }, { m: ['pillar'], w: 1.6 },
+    { m: ['nova'], w: 1.4, maxDist: 3 }, { m: ['blink', 'claw'], w: 1.2, minDist: 3 },
+    { m: ['quake', 'claw'], w: 1.2, enraged: true }, { m: ['storm'], w: 1.2, enraged: true }, { m: ['flame'], w: 1.3, enraged: true, maxDist: 4.5 }, { m: ['wave'], w: 1, enraged: true, maxDist: 3.5 },
+    { m: ['bolt', 'bolt', 'bolt'], w: 1.6, p3: true }, { m: ['blink', 'claw', 'claw2'], w: 1.6, p3: true }, { m: ['nova', 'pillar'], w: 1.4, p3: true, maxDist: 3 }] };
 KIND.praetor.moves.phalanx = () => ({ windup: tune.guard_thrust_windup, active: 1.2, recover: 0.6, dmg: tune.guard_bash_dmg * tune.praetor_dmg_mult * 1.5, range: 1.8, arc: 120, red: true, anim: 'charge', charge: true, chargeSpeed: tune.praetor_charge_speed, knock: 7 });
 Object.assign(KIND.recruit, { herald: 'một tân binh liều mạng', taunts: ['Tao cần tiền thưởng trên cái đầu mày.', 'Hôm nay tao sẽ nổi tiếng!'] });
 Object.assign(KIND.shield, { herald: 'một đấu sĩ khiên từ Capua', taunts: ['Kiếm mày sẽ gãy trên khiên tao.', 'Không ai xuyên qua được bức tường này.'] });
 Object.assign(KIND.net, { herald: 'một tay lưới của biển Đông', taunts: ['Lưới của tao chưa bắt hụt con nào.', 'Giãy đi, cá nhỏ.'] });
 Object.assign(KIND.dual, { herald: 'một tay song kiếm', taunts: ['Hai lưỡi kiếm, một cái xác.', 'Mày chậm quá.'] });
-// Chương 1 · Hố Cát: ten fights, a boss every fifth (the notes). foes: the kinds that walk in
-// together; vet: a returning foe, tougher (config.js vet_*); mercy: Tha hay Giết after it.
+// The ladder: five chapters of six fights, thirty in all, each chapter closing on its boss.
+// foes: the kinds that walk in together; vet: a returning foe, tougher (config.js vet_*);
+// demand: the crowd asks for something (a purse on top); pillars: stone columns on the sand;
+// water: the arena flooded; after: a scene once it is over; mercy: Tha hay Giết after it.
+const NF = (ch, foes, o) => Object.assign({ ch, foes }, o || {});
 const FIGHTS = [
-  { foes: ['recruit'], banner: 'TRẬN 1 · TÂN BINH', name: 'Tân binh',
-    win: 'Khá lắm, nhóc. Nhưng đó mới là thằng tân binh.' },
-  { foes: ['shield'], banner: 'TRẬN 2 · CASSIUS, ĐẤU SĨ KHIÊN', name: 'Cassius',
+  // Chương 1 · Hố Cát
+  NF(1, ['recruit'], { name: 'Tân binh', win: 'Khá lắm, nhóc. Nhưng đó mới là thằng tân binh.' }),
+  NF(1, ['shield'], { name: 'Cassius', bannerName: 'Cassius, đấu sĩ khiên',
     intro: 'Cassius núp sau cái khiên to. Đòn nhẹ dội lại vô ích: GIỮ chuột trái tung đòn nặng phá khiên, hoặc phản đòn!',
     introT: 'Cassius núp sau cái khiên to. Đòn nhẹ dội lại vô ích: GIỮ nút kiếm tung đòn nặng phá khiên, hoặc phản đòn!',
-    win: 'Vỡ khiên, vỡ luôn cái kiêu của nó!' },
-  { foes: ['net'], banner: 'TRẬN 3 · NEREUS, GIÁO VÀ LƯỚI', name: 'Nereus',
+    win: 'Vỡ khiên, vỡ luôn cái kiêu của nó!' }),
+  NF(1, ['net'], { name: 'Nereus', bannerName: 'Nereus, giáo và lưới',
     intro: 'Nereus đánh xa bằng chĩa ba. Nó quay lưới loé đỏ thì LĂN; dính lưới thì bấm Space liên tục mà giãy!',
     introT: 'Nereus đánh xa bằng chĩa ba. Nó quay lưới loé đỏ thì LĂN; dính lưới thì bấm nút lăn liên tục mà giãy!',
-    win: 'Thoát lưới, hạ luôn thằng cầm lưới. Mày học nhanh đấy.' },
-  { foes: ['recruit', 'recruit'], banner: 'TRẬN 4 · HAI TÂN BINH', name: 'Hai tân binh',
-    intro: 'Hai thằng một lúc! Đừng để bị kẹp giữa: lùi ra mép, hạ từng đứa một.',
-    win: 'Hai đứa nằm cả rồi! Giờ thì... con quái vật.' },
-  { foes: ['grull'], banner: 'TRẬN 5 · TRÙM: GRULL ĐỒ TỂ', name: 'Grull Đồ Tể', mercy: true, boss: true, after: 'afterGrull', mercyName: 'Grull',
+    win: 'Thoát lưới, hạ luôn thằng cầm lưới. Mày học nhanh đấy.' }),
+  NF(1, ['dual', 'recruit'], { name: 'Vex và tân binh', bannerName: 'Vex song kiếm và tân binh',
+    intro: 'Vex múa song kiếm: nhanh nhưng mỏng máu. Đỡ hết chuỗi chém, phản nhát cuối. Đừng để thằng tân binh lẻn ra sau lưng!',
+    win: 'Nhanh mấy cũng không nhanh bằng cái khiên của mày! Giờ thì... con quái vật.' }),
+  NF(1, ['grull'], { boss: true, mercy: true, after: 'afterGrull', name: 'Grull Đồ Tể', mercyName: 'Grull',
     intro: 'Grull Đồ Tể. Nó chậm, nhưng một búa là gãy xương. Chờ nó vung hụt rồi hẵng chém!',
-    win: 'Grull quỳ rồi! Cả Hố Cát đang nhìn mày...' },
-  { foes: ['dual'], banner: 'TRẬN 6 · VEX, SONG KIẾM', name: 'Vex',
-    intro: 'Vex múa song kiếm: nhanh nhưng mỏng máu. Đỡ hết chuỗi chém, phản nhát cuối, rồi đuổi theo lúc nó lùi!',
-    win: 'Nhanh mấy cũng không nhanh bằng cái khiên của mày!' },
-  { foes: ['net', 'recruit'], banner: 'TRẬN 7 · NEREUS VÀ TÂN BINH', name: 'Nereus và tân binh',
-    intro: 'Lưới và kiếm cùng lúc. Bị lưới là bị chém: hạ thằng cầm lưới trước!',
-    win: 'Gọn! Đám đông bắt đầu hô tên mày rồi đấy.' },
-  { foes: ['shield'], vet: true, banner: 'TRẬN 8 · CASSIUS BÁO THÙ', name: 'Cassius báo thù',
-    intro: 'Cassius quay lại, khiên dày hơn, giận hơn. Đòn nặng phá khiên, nhớ chưa?',
-    win: 'Cassius sẽ không quay lại lần thứ ba đâu.' },
-  { foes: ['dual', 'net'], banner: 'TRẬN 9 · VEX VÀ NEREUS', name: 'Vex và Nereus',
-    intro: 'Vex và Nereus. Đám đông đang cá mày gục ở trận này đấy!',
-    win: 'Một trận nữa thôi... và đó là trận tệ nhất.' },
-  { foes: ['lion'], banner: 'TRẬN 10 · TRÙM: SƯ TỬ NEMEA', name: 'Sư tử Nemea', boss: true,
-    intro: 'Sư tử Nemea! Da nó như sắt: chém thường không ăn thua. Phản đòn, hoặc lăn cho nó vồ hụt, lúc nó choáng mới chém! Lửa Ignar thì xuyên được.',
-    win: 'Con sư tử gục rồi! KAEL! KAEL! Hố Cát là của mày!' },
-];
-// Chương 2-4 (the notes' ladder): Kinh Đô 11-25, Colossus 26-45, Trận Cuối 46-50, a boss every fifth.
-// demand: the crowd asks for something (a purse on top); pillars: stone columns on the sand; water: the arena flooded;
-// after: a scene once it is over; mercy: Tha hay Giết.
-const NF = (ch, foes, o) => Object.assign({ ch, foes }, o || {});
-FIGHTS.push(
-  NF(2, ['axe']), NF(2, ['spear'], { demand: 'parry' }), NF(2, ['archer'], { demand: 'fast' }), NF(2, ['spear', 'recruit']),
+    win: 'Grull quỳ rồi! Cả Hố Cát đang nhìn mày...' }),
+  NF(1, ['lion'], { boss: true, name: 'Sư tử Nemea',
+    intro: 'Sư tử Nemea! Da nó như sắt: chém thường không ăn thua. Phản đòn, hoặc lăn cho nó vồ hụt, lúc nó choáng mới chém!',
+    win: 'Con sư tử gục rồi! KAEL! KAEL! Hố Cát là của mày!' }),
+  // Chương 2 · Kinh Đô, by night
+  NF(2, ['axe']),
+  NF(2, ['spear', 'archer'], { demand: 'parry' }),
+  NF(2, ['twinA', 'twinB'], { boss: true, bossName: 'CASTOR VÀ POLLUX', intro: 'Hai anh em thay phiên nhau đánh. Hạ một đứa là đứa kia nổi điên: chuẩn bị tinh thần!' }),
   NF(2, ['sabina'], { boss: true, mercy: true, bossName: 'SABINA, CUNG THẦN', mercyName: 'Sabina', after: 'afterSabina',
     intro: 'Sabina bắn từ xa: áp sát nó! Tên loé trắng thì gạt bằng khiên; vòng đỏ dưới chân là mưa tên, chạy ra ngay!' }),
-  NF(2, ['axe', 'archer'], { demand: 'flawless' }), NF(2, ['spear', 'spear']), NF(2, ['shield', 'archer'], { demand: 'parry' }), NF(2, ['axe', 'net']),
-  NF(2, ['twinA', 'twinB'], { boss: true, bossName: 'CASTOR VÀ POLLUX', intro: 'Hai anh em thay phiên nhau đánh. Hạ một đứa là đứa kia nổi điên: chuẩn bị tinh thần!' }),
-  NF(2, ['archer', 'archer'], { demand: 'fast' }), NF(2, ['axe'], { vet: true }), NF(2, ['dual', 'spear'], { demand: 'flawless' }), NF(2, ['shield', 'axe']),
+  NF(2, ['shield', 'axe'], { demand: 'fast' }),
   NF(2, ['chariot'], { boss: true, pillars: true, bossName: 'XE CHIẾN CỦA CRIXUS',
     intro: 'Xe của Crixus! Chém vào xe vô ích. Đứng sau cột đá: nó lao tới mà đâm vào cột là thằng đánh xe choáng. CHÉM lúc đó!' }),
-  NF(3, ['guard']), NF(3, ['axe', 'archer'], { demand: 'parry' }), NF(3, ['guard', 'spear']), NF(3, ['net', 'dual']),
+  // Chương 3 · Colossus, flooded
+  NF(3, ['guard']),
+  NF(3, ['net', 'dual'], { demand: 'parry' }),
+  NF(3, ['archer', 'spear'], { demand: 'fast' }),
+  NF(3, ['axe', 'axe'], { demand: 'flawless' }),
+  NF(3, ['guard', 'guard']),
   NF(3, ['admiral'], { boss: true, water: true, bossName: 'ĐÔ ĐỐC MARINUS', intro: 'Nước làm mày chậm. Nó dậm chĩa tạo sóng thì LĂN; xoáy nước đỏ dưới chân thì chạy ra!' }),
-  NF(3, ['guard', 'guard'], { demand: 'fast' }), NF(3, ['archer', 'spear']), NF(3, ['axe', 'axe'], { demand: 'flawless' }), NF(3, ['shield', 'net']),
-  NF(3, ['elephant'], { boss: true, bossName: 'VOI CHIẾN HANNO', intro: 'Voi chiến! Đừng đứng trước vòi nó. Nó lao thì lăn sang bên cho nó húc tường, rồi chém!' }),
-  NF(3, ['guard', 'archer'], { demand: 'parry' }), NF(3, ['dual', 'dual']), NF(3, ['spear', 'axe'], { demand: 'fast' }), NF(3, ['guard', 'net']),
-  NF(3, ['praetor', 'guard'], { boss: true, bossName: 'PRAETOR SEVERUS', after: 'bribe', intro: 'Severus: khiên dày, chịu đòn giỏi. Đòn nặng phá khiên, và coi chừng cú húc khiên của nó!' }),
-  NF(3, ['axe', 'archer']), NF(3, ['guard', 'dual'], { demand: 'flawless' }), NF(3, ['spear', 'spear'], { vet: true, demand: 'parry' }), NF(3, ['shield', 'guard']),
-  NF(3, ['mentor'], { boss: true, mercy: true, bossName: 'BRENNUS MỘT MẮT', mercyName: 'Brennus', after: 'afterBrennus',
+  // Chương 4 · Vườn Hoàng Đế
+  NF(4, ['axe', 'archer']),
+  NF(4, ['elephant'], { boss: true, bossName: 'VOI CHIẾN HANNO', intro: 'Voi chiến! Đừng đứng trước vòi nó. Nó lao thì lăn sang bên cho nó húc tường, rồi chém!' }),
+  NF(4, ['guard', 'dual'], { demand: 'flawless' }),
+  NF(4, ['praetor', 'guard'], { boss: true, bossName: 'PRAETOR SEVERUS', after: 'bribe', intro: 'Severus: khiên dày, chịu đòn giỏi. Đòn nặng phá khiên, và coi chừng cú húc khiên của nó!' }),
+  NF(4, ['spear', 'spear'], { vet: true, demand: 'parry' }),
+  NF(4, ['mentor'], { boss: true, mercy: true, bossName: 'BRENNUS MỘT MẮT', mercyName: 'Brennus', after: 'afterBrennus',
     intro: 'Lão Brennus biết hết đòn của mày: đòn nhẹ lão gạt được. Phản đòn, đòn nặng, đánh lúc lão hở!' }),
-  NF(4, ['guard', 'guard'], { vet: true }), NF(4, ['axe', 'dual'], { demand: 'fast' }), NF(4, ['archer', 'guard'], { demand: 'flawless' }), NF(4, ['guard', 'archer', 'spear']),
-  NF(4, ['golden'], { boss: true, mercy: true, bossName: 'KẺ BẤT BẠI', mercyName: 'Kẻ Bất Bại', after: 'reveal',
+  // Chương 5 · Nhật Thực
+  NF(5, ['guard', 'guard'], { vet: true }),
+  NF(5, ['axe', 'dual'], { demand: 'fast' }),
+  NF(5, ['shield', 'net'], { demand: 'parry' }),
+  NF(5, ['guard', 'archer', 'spear'], { demand: 'flawless' }),
+  NF(5, ['axe', 'guard', 'dual'], { vet: true }),
+  NF(5, ['golden'], { boss: true, mercy: true, bossName: 'KẺ BẤT BẠI', mercyName: 'Kẻ Bất Bại', after: 'reveal',
     intro: 'Kẻ Bất Bại. Nó gạt đòn nhẹ như Brennus. Phản đòn cho chuẩn, và đừng bao giờ đứng yên!' }),
-);
+  // Chương 6 · Tháp Sinh Tử: Valerian's tower, three floors to the top (tower: the floor)
+  NF(6, ['shield', 'dual'], { tower: 1, name: 'Tầng Máu', banner: 'TẦNG 1 · TẦNG MÁU',
+    intro: 'Tầng Máu: bóng ma của những kẻ mày từng giết, và lũ bóng trồi lên từ sàn. Chúng không biết đau, nhưng chém mãi cũng tan!',
+    win: 'Bóng ma tan hết rồi. Lên tầng hai!' }),
+  NF(6, ['idol_terrak', 'idol_fulmen', 'idol_ignar', 'idol_thalassa', 'idol_nox'], { tower: 2, name: 'Tầng Thần', banner: 'TẦNG 2 · TẦNG THẦN',
+    intro: 'Năm tượng thần bị tha hoá: kiếm vô ích! Mỗi tượng chỉ vỡ dưới đúng phép của nó: 1 Terrak, 2 Fulmen, 3 Ignar, 4 Thalassa, 5 Nox. Hết Thần Lực thì chém lũ bóng mà nạp!',
+    introT: 'Năm tượng thần bị tha hoá: kiếm vô ích! Mỗi tượng chỉ vỡ dưới đúng phép của nó: chạm biểu tượng thần cùng màu. Hết Thần Lực thì chém lũ bóng mà nạp!',
+    win: 'Năm vị thần đã trả ánh sáng! Lên đỉnh tháp!' }),
+  NF(6, ['sorcerer'], { tower: 3, boss: true, name: 'Cầu Sinh Tử', banner: 'TẦNG 3 · CẦU SINH TỬ · PHÁP SƯ VALERIAN', after: 'finale',
+    intro: 'Bóng tối nuốt đòn kiếm thường! PHẢN ĐÒN và gạt cầu bóng tối để nạp ÁNH SÁNG; đầy thanh là thánh kiếm bừng sáng. Vành cầu đỏ lên là sắp sụp: vào trong!',
+    win: 'VALERIAN GỤC NGÃ!' }),
+];
 const WIN_LINES = ['Gọn gàng! Đám đông thích thế.', 'Thêm một trận, thêm một bước tới tự do.', 'Nghe chúng hô tên mày chưa?', 'Tốt. Thở đi: trận sau không dễ hơn đâu.', 'Đẹp! Varro sẽ cười cả đêm nay.'];
 const cap = t => t ? t[0].toUpperCase() + t.slice(1) : t;
 /** Names as the banner says them: "A", "HAI A", "A VÀ B", "A, B VÀ C". */
@@ -2045,11 +2105,11 @@ function joinVi(a) {
 FIGHTS.forEach((F, i) => {
   F.ch = F.ch || 1;
   if (!F.name) F.name = F.bossName || joinVi(F.foes.map(k => KIND[k].name.split(' · ')[0])) + (F.vet ? ' LÃO LUYỆN' : '');
-  if (!F.banner) F.banner = `TRẬN ${i + 1} · ${F.boss ? 'TRÙM: ' : ''}${F.name}`;
+  if (!F.banner) F.banner = `TRẬN ${i + 1} · ${F.boss ? 'TRÙM: ' : ''}${(F.bannerName || F.name).toUpperCase()}`;
   if (!F.win) F.win = WIN_LINES[i % WIN_LINES.length];
 });
 const chapterEnds = i => i >= FIGHTS.length - 1 || FIGHTS[i + 1].ch !== FIGHTS[i].ch;
-/** The four chapters: their names, and what the chapter's end screen says of how it went. */
+/** The five chapters: their names, and what the chapter's end screen says of how it went. */
 const CHAPTERS = [
   { name: 'Hố Cát', sub: 'trường đấu của Gaius Varro',
     done: s => 'Sư tử Nemea gục ngã · ' + ((s.choices[4] || s.choice) === 'giet' ? 'Grull đã bị kết liễu' : 'Grull được tha mạng'),
@@ -2058,9 +2118,13 @@ const CHAPTERS = [
     done: s => 'Cỗ xe của Crixus vỡ nát · ' + (s.sabinaAlly ? 'Sabina là đồng minh' : 'Sabina đã chết'),
     quote: () => '"Ở Kinh Đô, đám đông không nhớ kẻ thua. Chúng chỉ nhớ người cuối cùng còn đứng."' },
   { name: 'Colossus', sub: 'đấu trường của các vị thần',
+    done: s => 'Đô đốc Marinus chìm dưới sóng · ' + (s.sabinaAlly ? 'Sabina vẫn sát cánh' : 'Kael đi một mình'),
+    quote: () => '"Dưới làn nước có một bức khảm mặt trời. Ai đó đã đục nát nó."' },
+  { name: 'Vườn Hoàng Đế', sub: 'khu vườn không có bóng nắng',
     done: s => (s.brennusDead ? 'Brennus đã ngã dưới kiếm Kael' : 'Brennus được tha mạng') + ' · ' + (s.lyra ? 'đã có tin Lyra' : 'chưa có tin Lyra'),
     quote: s => s.brennusDead ? '"Tôi xin lỗi, thầy."' : '"Cổ tay hắn có dấu búa thợ rèn... giống hệt của mày."' },
-  { name: 'Trận Cuối', sub: 'Kẻ Bất Bại đang chờ', done: () => '', quote: () => '' },
+  { name: 'Nhật Thực', sub: 'Kẻ Bất Bại đang chờ', done: () => '', quote: () => '' },
+  { name: 'Tháp Sinh Tử', sub: 'ba tầng tới đỉnh tháp', done: () => '', quote: () => '' },
 ];
 /** What the crowd may ask of a fight; met, the purse grows. */
 const DEMANDS = {
@@ -2072,14 +2136,14 @@ const DEMANDS = {
 /** The three endings (the notes): Tự Do with the price paid and Lyra found; otherwise Nghĩa leads to Khởi Nghĩa, Huyết to Vua Đấu Trường. */
 const ENDINGS = {
   tudo: { title: 'TỰ DO', color: '#BFD8C0', sub: 'Kael chuộc lại tự do và đưa Lyra về nhà',
-    text: s => `${tune.freedom_price} denarii rơi xuống bàn của Varro. Cánh cổng mở ra lần cuối, và lần này Kael bước ra ngoài, tay nắm tay Lyra. ` +
-      (s.choices[49] === 'giet' ? 'Chiếc mặt nạ vàng nằm lại trên cát.' : 'Phía sau họ, người cha đã tháo chiếc mặt nạ vàng.') + ' Phương Bắc vẫn còn đó.' },
+    text: s => `Trên đỉnh tháp, tên pháp sư tan thành tro, và toà tháp sụp xuống thành cát. ${tune.freedom_price} denarii rơi xuống bàn của Varro: Kael không còn nợ ai. ` +
+      'Anh bước qua cánh cổng lần cuối, tay nắm tay Lyra, chuôi kiếm của cha giắt bên hông. Phương Bắc vẫn còn đó.' },
   khoinghia: { title: 'KHỞI NGHĨA', color: '#E9C88A', sub: 'Đấu trường nổi dậy',
-    text: s => 'Kael giơ kiếm về phía lô Hoàng đế, và hàng trăm đấu sĩ đập vỡ xích. ' + (s.sabinaAlly ? 'Mũi tên đầu tiên là của Sabina. ' : '') +
-      'Đêm đó Aurelia cháy. Người ta không còn gọi anh là nô lệ, mà là người dẫn đầu.' },
+    text: s => 'Valerian chết, và Aurelia không còn hoàng đế. Kael giơ chuôi kiếm còn sáng lên trước cả đấu trường; hàng trăm đấu sĩ đập vỡ xích. ' + (s.sabinaAlly ? 'Mũi tên đầu tiên là của Sabina. ' : '') +
+      'Đêm đó Aurelia cháy, và sáng hôm sau mặt trời mọc lại. Người ta không còn gọi anh là nô lệ, mà là người dẫn đầu.' },
   vua: { title: 'VUA ĐẤU TRƯỜNG', color: '#E9B8A8', sub: 'Kael đeo chiếc mặt nạ vàng',
-    text: s => 'Kael đeo chiếc mặt nạ vàng lên. Đám đông gào tên anh như gào tên một vị thần: vị thần thứ sáu của Aurelia không cần tự do, anh có cả đấu trường. ' +
-      (s.lyra ? 'Lyra nhìn anh từ lô danh dự, và không còn nhận ra anh trai mình.' : 'Lyra vẫn ở đâu đó trong cung điện, chờ một người anh không bao giờ đến.') },
+    text: s => 'Ngai vàng bỏ trống. Kael nhặt chiếc mặt nạ vàng của cha lên từ đống tro và đeo vào. Đám đông gào tên anh như gào tên một vị thần: vị thần thứ sáu của Aurelia không cần tự do, anh có cả đấu trường. ' +
+      'Lyra đứng cạnh anh trong lô Hoàng đế, và không còn nhận ra anh trai mình.' },
 };
 function endingKind() {
   const s = state;
@@ -2263,6 +2327,964 @@ function updateSpellFx(dt) {
     if (u >= 1) { scene3.remove(p.m); FX.spikes.splice(i, 1); }
   }
 }
+// ---- The living arena: traps in the sand ---------------------------------------------------
+// Iron spikes that rise through a grate, a trench of oil that catches fire, a pillar with two
+// turning blades, and trapdoors over the pits below: part of the horde climbs out of them, a lion
+// is let up in some later fights, and anyone on an open hatch falls in. Each warns first (the
+// grate glows red, the oil smokes, the hatch rattles). They hurt everyone: Kael drives foes into
+// them with a heavy blow or a shield bash, and the crowd roars for it.
+const traps = [];
+const ironMat = mat(0x3A3530), ironLite = mat(0x8A8278), stoneB = mat(0xA89E88), hatchMat = mat(0x6A4A2A), hatchBand = mat(0x2E2824);
+const oilMat = new THREE.MeshPhongMaterial({ color: 0x17110C, shininess: 140, specular: 0x7A6A48 });
+const holeMat = new THREE.MeshBasicMaterial({ color: 0x050403 });
+const bladeMat = new THREE.MeshPhongMaterial({ color: 0xD0D0D8, shininess: 100, specular: 0xFFFFFF });
+const trapSpikeGeo = new THREE.ConeGeometry(0.1, 1.15, 5); trapSpikeGeo.translate(0, 0.575, 0);
+function glowPlane(w, d, color, y = 0.07) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+  m.rotation.x = -Math.PI / 2; m.position.y = y; return m;
+}
+function addSpikeTrap(x, z, off) {
+  const g = new THREE.Group(), S = tune.trap_spike_r * 2; g.position.set(x, 0, z);
+  g.add(at(box(S, 0.05, S, ironMat), 0, 0.025, 0));
+  for (let i = -1; i <= 1; i++) { g.add(at(box(S, 0.06, 0.08, ironLite), 0, 0.045, i * S / 3.2)); g.add(at(box(0.08, 0.06, S, ironLite), i * S / 3.2, 0.045, 0)); }
+  const glow = glowPlane(S * 1.15, S * 1.15, PAL.danger); g.add(glow);
+  const sp = new THREE.Group();
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { const c = new THREE.Mesh(trapSpikeGeo, ironLite); c.position.set((i - 1.5) * S / 4.4, 0, (j - 1.5) * S / 4.4); c.rotation.y = i + j; if (!CHEAP) c.castShadow = true; sp.add(c); }
+  sp.scale.y = 0.01; sp.visible = false; g.add(sp);
+  scene3.add(g); traps.push({ type: 'spike', x, z, g, glow, sp, off, hit: new Set(), was: 'idle', st: 0 });
+}
+function addOilTrap(x, z, yaw, off) {
+  const L = tune.trap_oil_len, w = tune.trap_oil_w, g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
+  g.add(at(box(w + 0.3, 0.04, L + 0.3, stoneB), 0, 0.02, 0));
+  g.add(at(box(w, 0.05, L, oilMat), 0, 0.035, 0));
+  const glow = glowPlane(w + 0.6, L + 0.6, 0xF08A3A, 0.08); g.add(glow);
+  scene3.add(g); traps.push({ type: 'oil', x, z, yaw, L, w, g, glow, off, cd: new Map(), was: 'idle', st: 0 });
+}
+function addBladeTrap(x, z) {
+  const R = tune.pillar_r, L = tune.trap_blade_len, g = new THREE.Group(); g.position.set(x, 0, z);
+  g.add(at(box(R * 2.4, 0.4, R * 2.4, stoneB), 0, 0.2, 0)); g.add(at(cyl(R, R * 1.05, 2.0, 10, mat(0xC8BEA6)), 0, 1.4, 0)); g.add(at(box(R * 2.2, 0.3, R * 2.2, stoneB), 0, 2.5, 0));
+  const arm = new THREE.Group(); arm.position.y = 0.95; arm.add(at(cyl(R * 1.15, R * 1.15, 0.34, 12, ironMat), 0, 0, 0));
+  for (const sg of [1, -1]) {
+    arm.add(at(box(0.12, 0.08, L - R, ironMat), 0, 0.06, sg * (R + (L - R) / 2)));
+    const b = at(box(0.04, 0.26, L - R, bladeMat), 0.07, -0.02, sg * (R + (L - R) / 2)); arm.add(b);
+  }
+  if (!CHEAP) arm.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  g.add(arm);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(L - 0.1, L + 0.05, 56), new THREE.MeshBasicMaterial({ color: PAL.danger, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; g.add(ring);
+  scene3.add(g); traps.push({ type: 'blade', x, z, g, arm, rot: 0, cd: new Map() });
+}
+function addDoorTrap(x, z, yaw) {
+  const S = 1.7, g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
+  const hole = at(new THREE.Mesh(new THREE.PlaneGeometry(S, S), holeMat), 0, 0.03, 0); hole.rotation.x = -Math.PI / 2; hole.visible = false; g.add(hole);
+  for (const [w, d, px, pz] of [[S + 0.2, 0.1, 0, S / 2 + 0.05], [S + 0.2, 0.1, 0, -S / 2 - 0.05], [0.1, S, S / 2 + 0.05, 0], [0.1, S, -S / 2 - 0.05, 0]]) g.add(at(box(w, 0.08, d, ironMat), px, 0.04, pz));
+  const leaves = [];
+  for (const sg of [-1, 1]) {
+    const pv = new THREE.Group(); pv.position.set(sg * S / 2, 0.05, 0);
+    pv.add(at(box(S / 2 - 0.02, 0.07, S - 0.04, hatchMat), -sg * S / 4, 0, 0));
+    for (const bz of [-S / 3, S / 3]) pv.add(at(box(S / 2 - 0.04, 0.08, 0.1, hatchBand), -sg * S / 4, 0.01, bz));
+    g.add(pv); leaves.push({ pv, sg });
+  }
+  scene3.add(g); traps.push({ type: 'door', x, z, g, hole, leaves, state: 'shut', t: 0, spawn: null, open: 0 });
+}
+/** The fight's traps: fewer and simpler early on, more of them chapter by chapter; the same layout every time a fight is played. */
+function setTraps(i) {
+  for (const t of traps) scene3.remove(t.g);
+  traps.length = 0;
+  const F = FIGHTS[i];
+  if (!tune.traps_on || i + 1 < tune.trap_from_fight || F.tower) return;
+  const ch = F.ch, lr = makeRand(9100 + i), spots = [];
+  const ok = (x, z, r) => Math.hypot(x, z - 3.4) > r + 2.0 && !(Math.abs(x) < r + 1.4 && z < -2.0) // Kael's start and the gate's lane stay clear
+    && spots.every(p => Math.hypot(p.x - x, p.z - z) > p.r + r + 0.7) && pillars.every(p => Math.hypot(p.x - x, p.z - z) > r + 1.2)
+    && props.every(p => Math.hypot(p.x - x, p.z - z) > p.r + r + 0.6) && muds.every(m => Math.hypot(m.x - x, m.z - z) > m.r + r + 0.3);
+  const place = (r, d0, d1) => {
+    for (let n = 0; n < 80; n++) { const a = lr() * TAU, d = d0 + lr() * (d1 - d0), x = Math.sin(a) * d, z = Math.cos(a) * d; if (ok(x, z, r)) { spots.push({ x, z, r }); return { x, z, a }; } }
+    return null;
+  };
+  if (ch >= tune.trap_blade_from_ch && !F.pillars) { const p = place(tune.trap_blade_len, 3.4, 5.2); if (p) addBladeTrap(p.x, p.z); }
+  if (ch >= tune.trap_oil_from_ch) { const p = place(tune.trap_oil_len / 2, 4.6, 6.4); if (p) addOilTrap(p.x, p.z, p.a + Math.PI / 2, lr() * tune.trap_oil_period); }
+  const n = tune['trap_spikes_ch' + clamp(ch, 1, 5)];
+  for (let j = 0; j < n; j++) { const p = place(tune.trap_spike_r, 2.2, 6.8); if (p) addSpikeTrap(p.x, p.z, j * tune.trap_spike_period / n + 0.8); }
+  if (i + 1 >= tune.trap_doors_from_fight) for (let j = 0; j < tune.trap_doors; j++) { const p = place(1.0, 5.8, 7.4); if (p) addDoorTrap(p.x, p.z, p.a); }
+  if (traps.length) say('traps', 'Sàn có bẫy! Lưới đỏ rực là gai sắp trồi, dầu bốc khói là sắp cháy. Đòn nặng, húc khiên: ĐẨY tụi nó vào!', 5, 2);
+  if (traps.some(t => t.type === 'door')) say('doors', 'Cửa hầm! Lính chui lên từ dưới đó. Hầm đang mở thì đẩy tụi nó xuống!', 4.5, 2);
+  events.push({ type: 'traps', n: traps.length, kinds: traps.map(t => t.type).join(',') });
+}
+/** Kael caught by a trap (a roll goes through it). */
+function trapHurtKael(dmg, label, ox, oz, knock, light) {
+  const k = state.kael;
+  if (k.state === 'roll' && k.t < tune.roll_iframes) return false;
+  hurtKael(dmg, null, 0, light);
+  if (knock) { const dx = k.x - ox, dz = k.z - oz, d = Math.hypot(dx, dz) || 1; k.kbx = dx / d * knock; k.kbz = dz / d * knock; }
+  popup(label, k.x, k.z, '#F08A4B', 22);
+  events.push({ type: 'traphurt', label });
+  return true;
+}
+/** A foe caught by a trap: hurt more than Kael would be (a boss less), thrown off, and the crowd's if it dies. */
+function trapHurt(e, dmg, label, ox, oz, knock, stun) {
+  const D = KIND[e.kind];
+  dmg *= tune.trap_foe_mult * (D.boss ? tune.trap_boss_mult : 1);
+  e.hp -= dmg; e.flash = 1; e.lastBlow = { heavy: true, trap: true };
+  FX.pops.push({ text: String(Math.round(dmg)), x: e.x + (deco() - 0.5) * 0.6, y: 2.0, z: e.z, t: 0.2, color: '#F08A4B', size: 22 });
+  if (knock) { const dx = e.x - ox, dz = e.z - oz, d = Math.hypot(dx, dz) || 1; e.kbx = dx / d * knock * (D.boss ? tune.knock_boss_mult : 1); e.kbz = dz / d * knock * (D.boss ? tune.knock_boss_mult : 1); }
+  if (stun && e.hp > 0 && !D.chariot && !D.beast && !(D.boss && e.state === 'attack')) { e.state = 'hitstun'; e.t = 0; e.move = null; e.red = 0; e.tele = null; e.stunT = 0.5; }
+  events.push({ type: 'traphit', kind: e.kind, dmg: Math.round(dmg) });
+  if (e.hp <= 0) trapKill(e, label);
+  else if (!D.fodder) fame(tune.fame_trap_hit, label, e.x, e.z);
+}
+function trapKill(e, label) {
+  state.trapKills = (state.trapKills || 0) + 1;
+  fame(tune.fame_trap_kill, label, e.x, e.z); sfx('cheer', 1.2); crowd.excite = Math.max(crowd.excite, 1);
+  say('trapkill', 'Ha! Đám đông mê cái đó! Đẩy thêm đứa nữa vào!', 2.6, 2, 25);
+  events.push({ type: 'trapkill', kind: e.kind, label });
+  killEnemy(e);
+}
+/** A hatch starts to rattle; when it opens, what waits below climbs out. */
+function openDoor(t, kind) { t.state = 'warn'; t.t = 0; t.spawn = kind; sfx('stomp'); }
+function releaseFromDoor(t) {
+  const s = state, F = FIGHTS[s.fight], kind = t.spawn; t.spawn = null;
+  if (!kind || s.phase !== 'fight') return;
+  const e = newFighter(kind, false, F.ch - 1);
+  if (kind === 'lion') { e.hp = e.maxHp = e.maxHp * tune.trap_lion_hp_mult; }
+  Object.assign(e, { x: t.x, z: t.z, px: t.x, pz: t.z, y: 0.01, vy: tune.trap_door_jump, yaw: Math.atan2(s.kael.x - t.x, s.kael.z - t.z), state: kind === 'lion' ? 'roar' : 'circle', t: 0, thinkT: 0.9, pitSafe: 1.4 });
+  s.foes.push(e); burst(t.x, 0.3, t.z, 'dust', 16, 3, 3);
+  if (kind === 'lion') { sfx('roar'); shake = 0.4; crowd.excite = 1.2; popup('THẢ SƯ TỬ!', t.x, t.z, '#F08A4B', 28); }
+  events.push({ type: 'doorspawn', kind });
+}
+/** Someone over an open hatch: a common foe falls in and is gone; Kael, a boss or a beast climbs out hurt. */
+function pitFall(f, t) {
+  const s = state, k = s.kael, D = KIND[f.kind], F = FIGHTS[s.fight];
+  let ox = f.x - t.x, oz = f.z - t.z, d = Math.hypot(ox, oz);
+  if (d < 0.05) { ox = -t.x; oz = -t.z; d = Math.hypot(ox, oz) || 1; }
+  ox /= d; oz /= d; f.pitSafe = 1.2;
+  if (f === k) {
+    if (!trapHurtKael(tune.trap_pit_dmg, 'RƠI XUỐNG HẦM!', t.x, t.z, 0, false)) return;
+    k.vy = tune.trap_door_jump; k.kbx = ox * 9; k.kbz = oz * 9;
+    say('pitkael', 'Leo lên! Đừng đứng trên cửa hầm đang mở!', 3, 2, 15);
+    return;
+  }
+  if (D.boss || D.beast || D.chariot || (F.mercy && !D.fodder)) {
+    trapHurt(f, tune.trap_pit_dmg, 'RƠI XUỐNG HẦM!', t.x, t.z, 0, true);
+    if (f.hp > 0) { f.vy = tune.trap_door_jump; f.kbx = ox * 9; f.kbz = oz * 9; }
+    return;
+  }
+  f.hp = 0; FIG.get(f).root.visible = false; burst(t.x, 0.3, t.z, 'dust', 14, 3, 2.5); sfx('thud');
+  trapKill(f, 'RƠI XUỐNG HẦM!');
+  f.vy = 0; f.fling = false; f.kbx = f.kbz = 0; f.fell = true;
+}
+function updateTraps(dt) {
+  if (!traps.length) return;
+  const s = state, k = s.kael, on = s.phase === 'fight' && scene === 'play';
+  if (on) s.trapT = (s.trapT || 0) + dt;
+  const T = s.trapT || 0;
+  for (const f of s.foes) if (f.pitSafe > 0) f.pitSafe -= dt;
+  if (k.pitSafe > 0) k.pitSafe -= dt;
+  const who = [k, ...s.foes].filter(f => alive(f) && !KIND[f.kind].chariot && f.state !== 'enter' && f.state !== 'gatewait');
+  const low = f => (f.y || 0) < 0.4;
+  // in some later fights a lion is let up through a hatch, halfway through the horde
+  const F = FIGHTS[s.fight];
+  if (on && !s.lionOut && F.ch >= tune.trap_lion_from_ch && !F.boss && (s.fight + 1) % tune.trap_lion_every === 0 && s.hordeMax > 0 && s.hordeLeft > 0 && s.hordeLeft <= Math.floor(s.hordeMax / 2)) {
+    const d = traps.filter(t => t.type === 'door' && t.state === 'shut').sort((a, b) => Math.hypot(b.x - k.x, b.z - k.z) - Math.hypot(a.x - k.x, a.z - k.z))[0];
+    if (d) { s.lionOut = true; openDoor(d, 'lion'); d.warnMul = 2; say('liondoor' + s.fight, 'Nghe tiếng gầm dưới hầm kìa! Họ thả SƯ TỬ lên!', 3.5, 3); }
+  }
+  for (const t of traps) {
+    if (t.type === 'spike') {
+      const P = tune.trap_spike_period, u = (T + t.off) % P, upAt = P - tune.trap_spike_up, warnAt = upAt - tune.trap_spike_warn;
+      const st = !on ? 'idle' : u >= upAt ? 'up' : u >= warnAt ? 'warn' : 'idle';
+      if (st !== t.was) {
+        if (st === 'up') { t.sp.visible = true; sfx('clang'); burst(t.x, 0.2, t.z, 'dust', 8, 2.5, 2); burst(t.x, 0.4, t.z, 'spark', 6, 3, 3); }
+        if (st === 'idle') t.hit.clear();
+        t.was = st; t.st = 0;
+      }
+      t.st += dt;
+      t.glow.material.opacity = st === 'warn' ? (Math.sin(t.st * 24) > 0 ? 0.7 : 0.3) : st === 'up' ? 0.2 : 0;
+      t.sp.scale.y = st === 'up' ? Math.min(1, Math.max(0.01, t.st / 0.07)) : Math.max(0.01, t.sp.scale.y - dt * 3);
+      if (st !== 'up' && t.sp.scale.y <= 0.011) t.sp.visible = false;
+      if (st === 'warn' && Math.floor(t.st * 8) !== Math.floor((t.st - dt) * 8)) burst(t.x + (deco() - 0.5) * 1.2, 0.1, t.z + (deco() - 0.5) * 1.2, 'dust', 1, 1, 1.2);
+      if (st === 'up' && t.st < tune.trap_spike_up - 0.25) for (const f of who) {
+        if (t.hit.has(f) || !low(f) || Math.hypot(f.x - t.x, f.z - t.z) > tune.trap_spike_r + f.r * 0.4) continue;
+        t.hit.add(f);
+        if (f === k) { if (trapHurtKael(tune.trap_spike_dmg, 'GAI SẮT!', t.x, t.z, tune.trap_knock, false)) k.vy = 3; }
+        else { trapHurt(f, tune.trap_spike_dmg, 'XIÊN GAI!', t.x, t.z, tune.trap_knock, true); if (!KIND[f.kind].boss && !KIND[f.kind].beast) f.vy = Math.max(f.vy || 0, 4); }
+        burst(f.x, 0.8, f.z, 'spark', 8, 3.5, 2.5);
+      }
+    } else if (t.type === 'oil') {
+      const P = tune.trap_oil_period, u = (T + t.off) % P, burnAt = P - tune.trap_oil_burn, warnAt = burnAt - tune.trap_oil_warn;
+      const st = !on ? 'idle' : u >= burnAt ? 'burn' : u >= warnAt ? 'warn' : 'idle';
+      if (st !== t.was) { if (st === 'burn') { sfx('heavySwish'); sfx('thud'); flash(t.x, 0.8, t.z, 4, 0xF08A3A, false, 0.3); } t.was = st; t.st = 0; }
+      t.st += dt;
+      const sy = Math.sin(t.yaw), cy = Math.cos(t.yaw);
+      const along = (u0, a0) => [t.x + u0 * sy + a0 * cy, t.z + u0 * cy - a0 * sy];
+      if (st === 'burn') {
+        t.glow.material.opacity = 0.55 + 0.2 * Math.sin(t.st * 31);
+        for (let j = 0; j < (CHEAP ? 1 : 2); j++) { const [px, pz] = along((deco() - 0.5) * t.L, (deco() - 0.5) * t.w); burst(px, 0.12, pz, deco() > 0.35 ? 'fire' : 'ember', 1, 0.5, 3.6); }
+        for (const f of who) {
+          const dx = f.x - t.x, dz = f.z - t.z, al = dx * sy + dz * cy, ac = dx * cy - dz * sy;
+          if (!low(f) || Math.abs(al) > t.L / 2 + f.r * 0.3 || Math.abs(ac) > t.w / 2 + f.r * 0.3 || T - (t.cd.get(f) ?? -99) < tune.trap_oil_tick) continue;
+          t.cd.set(f, T);
+          if (f === k) { trapHurtKael(tune.trap_oil_dmg, 'BỎNG DẦU!', t.x, t.z, 0, true); say('oil', 'Dầu cháy! Ra khỏi rãnh!', 2.4, 2, 15); }
+          else { f.burn = 1; trapHurt(f, tune.trap_oil_dmg, 'CHÁY DẦU!', t.x, t.z, 0, false); }
+        }
+      } else if (st === 'warn') {
+        t.glow.material.opacity = Math.sin(t.st * 18) > 0 ? 0.22 : 0.08;
+        if (Math.floor(t.st * 12) !== Math.floor((t.st - dt) * 12)) { const [px, pz] = along((deco() - 0.5) * t.L, 0); burst(px, 0.1, pz, 'dust', 1, 0.6, 1.6); }
+      } else t.glow.material.opacity = 0;
+    } else if (t.type === 'blade') {
+      t.rot += dt * tune.trap_blade_speed * (on ? 1 : 0.35); t.arm.rotation.y = t.rot;
+      for (const f of who) { // the column: walked round, like a pillar
+        const dx = f.x - t.x, dz = f.z - t.z, d = Math.hypot(dx, dz), min = tune.pillar_r + f.r;
+        if (d < min && d > 0.0001) { f.x = t.x + dx / d * min; f.z = t.z + dz / d * min; }
+      }
+      if (on) for (const f of who) {
+        if (T - (t.cd.get(f) ?? -99) < 0.8 || (f.y || 0) > 1.3) continue;
+        const dx = f.x - t.x, dz = f.z - t.z;
+        for (let a = 0; a < 2; a++) {
+          const ang = t.rot + a * Math.PI, sa = Math.sin(ang), ca = Math.cos(ang), al = dx * sa + dz * ca, pp = dx * ca - dz * sa;
+          if (al < tune.pillar_r || al > tune.trap_blade_len + f.r * 0.5 || Math.abs(pp) > f.r * 0.7 + 0.12) continue;
+          t.cd.set(f, T); sfx('clang'); burst(f.x, 1.0, f.z, 'spark', 10, 4, 2.5);
+          if (f === k) trapHurtKael(tune.trap_blade_dmg, 'LƯỠI DAO!', t.x, t.z, tune.trap_knock * 1.4, false);
+          else trapHurt(f, tune.trap_blade_dmg, 'LƯỠI DAO!', t.x, t.z, tune.trap_knock * 1.4, true);
+          break;
+        }
+      }
+    } else if (t.type === 'door') {
+      t.t += dt;
+      if (t.state === 'warn') {
+        for (const l of t.leaves) l.pv.rotation.z = l.sg * -0.06 * Math.max(0, Math.sin(t.t * 40));
+        if (Math.floor(t.t * 10) !== Math.floor((t.t - dt) * 10)) burst(t.x + (deco() - 0.5) * 1.4, 0.1, t.z + (deco() - 0.5) * 1.4, 'dust', 1, 1.2, 1.4);
+        if (t.t >= tune.trap_door_warn * (t.warnMul || 1)) { t.state = 'open'; t.t = 0; t.warnMul = 1; t.hole.visible = true; sfx('thud'); sfx('stone'); releaseFromDoor(t); }
+      } else if (t.state === 'open') {
+        t.open = Math.min(1, t.open + dt / 0.25);
+        if (on && t.t > 0.25) for (const f of who) if (!(f.pitSafe > 0) && (f.y || 0) < 0.1 && Math.hypot(f.x - t.x, f.z - t.z) < tune.trap_pit_r) pitFall(f, t);
+        if (t.t >= tune.trap_door_open) { t.state = 'closing'; t.t = 0; }
+      } else if (t.state === 'closing') {
+        t.open = Math.max(0, t.open - dt / 0.4);
+        if (t.open <= 0) { t.state = 'shut'; t.hole.visible = false; sfx('thud'); }
+      }
+      if (t.state !== 'warn') for (const l of t.leaves) l.pv.rotation.z = l.sg * -1.9 * t.open;
+    }
+  }
+}
+// ---- Each chapter its own arena -------------------------------------------------------------
+// Hố Cát, Varro's pit: a fence of sharpened stakes inside the wall that bites whoever is thrown
+// against it, and mud that slows whoever wades in. Kinh Đô by night: four torch posts light the
+// sand; a foe (or Kael) thrown into one knocks it down, the fire spills along the ground and that
+// side goes dark. Colossus flooded: the sea over the sand, a wrecked galley, and a wave every few
+// seconds that sweeps everyone along (into the traps too). Trận Cuối in the Emperor's garden: grass,
+// trees, marble statues that topple onto whoever is past them, and wine the Emperor throws down
+// while the crowd is with Kael. Nhật Thực: the sun goes out over the fight, and pools of shadow on
+// the sand grow with it; Kael in one bleeds, a foe in one heals.
+const props = [], muds = [], gifts = [], shades = [], dress = {};
+let arenaLights = null, waveG = null;
+const woodM = mat(0x6E5034), woodD = mat(0x5C432C), marbleM = mat(0xE2DBCB), marbleD = mat(0xB8B0A0);
+const mudMat = new THREE.MeshPhongMaterial({ color: 0x6A4E32, shininess: 60, specular: 0x6A5A46 }), puddleMat = new THREE.MeshPhongMaterial({ color: 0x4A3A2A, shininess: 120, specular: 0xC8C0B0 });
+const mudEdge = new THREE.MeshBasicMaterial({ color: 0x7E6446, transparent: true, opacity: 0.55, depthWrite: false });
+const flameMatO = new THREE.MeshBasicMaterial({ color: 0xE0782E }), flameMatI = new THREE.MeshBasicMaterial({ color: 0xF4B860 });
+/** The still dressing of a chapter, built the first time it is needed: the stake fence, the garden's grass and trees. */
+function dressFor(ch) {
+  if (dress[ch]) return dress[ch];
+  const g = new THREE.Group(); scene3.add(g); dress[ch] = g;
+  const own = m => { scene3.remove(m); g.add(m); return m; };
+  if (ch === 1) { // the stake fence, two rails, a gap at the gate
+    const poles = [], tips = [], rails = [], N = 120;
+    for (let i = 0; i < N; i++) {
+      const a = (i + 0.5) / N * TAU; if (Math.abs(angDiff(a, GATE_A)) < 0.26) continue;
+      const h = 1.5 + hash2(i, 3) * 0.35, r = FENCE_R - 0.18;
+      poles.push({ a, r, y: h / 2, w: 1, h, d: 1, c: vary(0x6E5034, i, 1, 0.12) });
+      tips.push({ a, r, y: h + 0.14, w: 1, h: 1, d: 1 });
+      rails.push({ a, r: r + 0.12, y: 0.55, w: TAU * r / N + 0.02, h: 0.09, d: 0.07, c: 0x5C432C }, { a, r: r + 0.12, y: 1.15, w: TAU * r / N + 0.02, h: 0.09, d: 0.07, c: 0x5C432C });
+    }
+    own(ringBoxes(poles, mat(0xffffff), new THREE.CylinderGeometry(0.1, 0.12, 1, 6)));
+    own(ringBoxes(tips, mat(0x8A6A48), new THREE.ConeGeometry(0.1, 0.28, 6)));
+    own(ringBoxes(rails));
+  }
+  if (ch === 4) { // grass over the sand, trees by the wall
+    const grass = polarGround(0, FENCE_R + 0.1, 16, 64, (x, z) => {
+      const r = Math.hypot(x, z), n = Math.sin(x * 0.6 + 1.3) * Math.cos(z * 0.5 - 0.4);
+      if (r > FENCE_R - 0.7) return hash2(x, z) > 0.5 ? 0x4E6A34 : 0x46602E;
+      if (n > 0.6) return 0x5E7E3C;
+      return hash2(Math.round(x * 3), Math.round(z * 3)) > 0.5 ? 0x6A8A44 : 0x628240;
+    }, 0);
+    grass.position.y = 0.02; grass.receiveShadow = true; g.add(grass);
+    const trunks = [], crowns = [], crowns2 = [];
+    for (let i = 0; i < 18; i++) {
+      const a = (i + 0.5) / 18 * TAU; if (Math.abs(angDiff(a, GATE_A)) < 0.4) continue;
+      const r = FENCE_R - 0.55, h = 2.0 + hash2(i, 9) * 0.8;
+      trunks.push({ a, r, y: h / 2, w: 1, h, d: 1 });
+      crowns.push({ a, r, y: h + 0.6, w: 1.5, h: 1.3, d: 1.5, c: vary(0x4A6E2E, i, 2, 0.12) });
+      crowns2.push({ a: a + 0.03, r: r - 0.3, y: h + 1.3, w: 1.0, h: 0.9, d: 1.0, c: vary(0x5A7E36, i, 4, 0.12) });
+    }
+    own(ringBoxes(trunks, mat(0x5A4028), new THREE.CylinderGeometry(0.13, 0.18, 1, 6)));
+    own(ringBoxes(crowns, mat(0xffffff), new THREE.IcosahedronGeometry(0.75, 0)));
+    own(ringBoxes(crowns2, mat(0xffffff), new THREE.IcosahedronGeometry(0.75, 0)));
+  }
+  return g;
+}
+function stand(g) { if (!CHEAP) g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); }
+function addTorchPost(x, z, j) {
+  const g = new THREE.Group(); g.position.set(x, 0, z);
+  const pv = new THREE.Group(); g.add(pv);
+  pv.add(at(cyl(0.09, 0.12, 2.4, 6, woodD), 0, 1.2, 0));
+  pv.add(at(cyl(0.3, 0.14, 0.26, 10, mat(0x7A5A34)), 0, 2.5, 0));
+  const fo = at(new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.6, 6), flameMatO), 0, 2.88, 0), fi = at(new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.4, 6), flameMatI), 0, 2.8, 0);
+  pv.add(fo, fi);
+  g.add(at(box(0.6, 0.12, 0.6, mat(0x988D76)), 0, 0.06, 0));
+  stand(g); scene3.add(g);
+  const light = arenaLights[j]; light.position.set(x, 2.9, z);
+  props.push({ kind: 'torch', x, z, r: 0.32, g, pv, fo, fi, light, own: true, down: false, fall: 0, glow: 1, fires: null, fireT: 0, cd: new Map() });
+}
+function addStatue(x, z, a) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = a;
+  g.add(at(box(1.0, 0.6, 1.0, marbleD), 0, 0.3, 0));
+  const pv = new THREE.Group(); pv.position.y = 0.6; g.add(pv);
+  pv.add(at(cyl(0.3, 0.42, 1.5, 9, marbleM), 0, 0.75, 0)); pv.add(at(cyl(0.38, 0.3, 0.5, 9, marbleM), 0, 1.7, 0));
+  pv.add(at(new THREE.Mesh(new THREE.IcosahedronGeometry(0.24, 1), marbleM), 0, 2.15, 0));
+  const arm = at(cyl(0.08, 0.07, 0.9, 6, marbleM), 0.38, 1.95, 0); arm.rotation.z = -0.6; pv.add(arm);
+  pv.add(at(box(0.06, 1.3, 0.06, mat(0xC8A060)), 0.62, 2.2, 0)); // a spear of gilt bronze
+  stand(g); scene3.add(g);
+  props.push({ kind: 'statue', x, z, r: 0.55, g, pv, own: true, down: false, fall: 0 });
+}
+function addHull(x, z, yaw) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = yaw;
+  const hull = new THREE.Group(); hull.rotation.z = 0.32; hull.position.y = 0.25; g.add(hull);
+  hull.add(at(box(1.5, 0.7, 4.0, woodM), 0, 0.2, 0));
+  hull.add(at(box(1.1, 0.5, 0.9, woodD), 0, 0.15, 2.3)); hull.add(at(box(0.7, 0.4, 0.6, woodD), 0, 0.2, 2.85)); // the prow
+  for (let i = -1; i <= 1; i++) hull.add(at(box(1.62, 0.08, 0.1, woodD), 0, 0.5, i * 1.2));
+  const mast = at(cyl(0.1, 0.12, 2.6, 6, woodD), 0, 1.4, -0.4); mast.rotation.x = 0.5; hull.add(mast);
+  const sail = at(box(0.04, 1.2, 1.4, mat(0xD8C8A8)), 0.08, 1.9, -0.2); sail.rotation.x = 0.5; hull.add(sail);
+  stand(g); scene3.add(g);
+  const ax = Math.sin(yaw), az = Math.cos(yaw);
+  props.push({ kind: 'hull', x: x + ax * 1.1, z: z + az * 1.1, r: 0.85, g, own: true }, { kind: 'hull', x: x - ax * 1.1, z: z - az * 1.1, r: 0.85, g, own: false });
+}
+function addMud(x, z, r) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = hash2(x, z) * 3;
+  const e = new THREE.Mesh(new THREE.CircleGeometry(r * 1.12, 22), mudEdge); e.rotation.x = -Math.PI / 2; e.position.y = 0.012; e.scale.set(1, 0.82, 1); g.add(e);
+  const m = new THREE.Mesh(new THREE.CircleGeometry(r, 22), mudMat); m.rotation.x = -Math.PI / 2; m.position.y = 0.02; m.scale.set(1, 0.82, 1); g.add(m);
+  for (let j = 0; j < 4; j++) { const q = new THREE.Mesh(new THREE.CircleGeometry(r * (0.16 + hash2(j, x) * 0.14), 10), puddleMat); q.rotation.x = -Math.PI / 2; q.position.set((hash2(x, j) - 0.5) * r, 0.026, (hash2(j, z) - 0.5) * r * 0.7); q.scale.set(1, 0.7, 1); g.add(q); }
+  for (let j = 0; j < 7; j++) { const c = new THREE.Mesh(new THREE.DodecahedronGeometry(0.09 + hash2(j, z) * 0.08, 0), mudMat); c.position.set((hash2(j + 3, x) - 0.5) * r * 1.6, 0.04, (hash2(z, j + 5) - 0.5) * r * 1.3); g.add(c); } // clods
+  scene3.add(g); muds.push({ x, z, r, g });
+}
+const inMud = f => muds.some(m => Math.hypot(f.x - m.x, f.z - m.z) < m.r * 0.9);
+const shadeMat = new THREE.MeshBasicMaterial({ color: 0x120A1E, transparent: true, opacity: 0.78, depthWrite: false });
+const shadeEdge = new THREE.MeshBasicMaterial({ color: 0x6A5AB8, transparent: true, opacity: 0.45, depthWrite: false });
+function addShade(x, z, r) {
+  const g = new THREE.Group(); g.position.set(x, 0, z);
+  const e = new THREE.Mesh(new THREE.RingGeometry(r * 0.96, r * 1.08, 28), shadeEdge); e.rotation.x = -Math.PI / 2; e.position.y = 0.03; g.add(e);
+  const m = new THREE.Mesh(new THREE.CircleGeometry(r, 28), shadeMat); m.rotation.x = -Math.PI / 2; m.position.y = 0.025; g.add(m);
+  scene3.add(g); shades.push({ x, z, r, g, cd: new Map() });
+}
+const inShade = f => shades.some(m => Math.hypot(f.x - m.x, f.z - m.z) < m.r * m.g.scale.x * 0.92);
+
+/** The fight's arena: the chapter's dressing shown, its props and patches laid out (the same each time the fight is played). */
+function setArenaDress(i) {
+  for (const p of props) if (p.own) scene3.remove(p.g);
+  props.length = 0;
+  for (const m of muds) scene3.remove(m.g);
+  muds.length = 0;
+  for (const j of gifts) scene3.remove(j.g);
+  gifts.length = 0;
+  for (const m of shades) scene3.remove(m.g);
+  shades.length = 0;
+  if (!arenaLights) { arenaLights = [0, 1, 2, 3].map(() => { const l = new THREE.PointLight(0xFF9A4A, 0, 11, 1.6); scene3.add(l); return l; }); }
+  for (const l of arenaLights) l.intensity = 0;
+  const s = state, F = FIGHTS[i], ch = clamp(F.ch, 1, 5), on = !!tune.arenas_on;
+  for (const c of [1, 4]) dressFor(c).visible = on && c === ch;
+  s.dressOn = on && i + 1 >= tune.arena_from_fight && !F.tower; s.wave = null; s.waveT = tune.wave_first; s.giftT = tune.gift_first; s.eclipse = 0;
+  if (waveG) waveG.visible = false;
+  if (!s.dressOn) return;
+  const lr = makeRand(7300 + i);
+  const clear = (x, z, r) => Math.hypot(x, z - 3.4) > r + 1.8 && !(Math.abs(x) < r + 1.4 && z < -2.0) && pillars.every(p => Math.hypot(p.x - x, p.z - z) > r + 1.2)
+    && props.every(p => Math.hypot(p.x - x, p.z - z) > p.r + r + 0.8) && muds.every(m => Math.hypot(m.x - x, m.z - z) > m.r + r + 0.5)
+    && shades.every(m => Math.hypot(m.x - x, m.z - z) > m.r * tune.shadow_grow + r + 0.4);
+  const place = (r, d0, d1) => {
+    for (let n = 0; n < 80; n++) { const a = lr() * TAU, d = d0 + lr() * (d1 - d0), x = Math.sin(a) * d, z = Math.cos(a) * d; if (clear(x, z, r)) return { x, z, a }; }
+    return null;
+  };
+  if (ch === 1) {
+    for (let j = 0; j < tune.mud_count; j++) { const r = tune.mud_r * (0.8 + lr() * 0.4), p = place(r, 2.4, 7.4 - r); if (p) addMud(p.x, p.z, r); }
+    say('arena1', 'Hố của Varro: rào cọc nhọn quanh sân, bùn dưới chân. Hất tụi nó vào cọc! Còn mày: đừng để bị dồn vào rào.', 5, 2);
+  } else if (ch === 2) {
+    [0.35, Math.PI - 0.35, -0.95, -Math.PI + 0.95].forEach((a, j) => addTorchPost(Math.cos(a) * 6.9, Math.sin(a) * 6.9, j));
+    say('arena2', 'Đêm ở Kinh Đô. Hất địch vào cột đuốc: đuốc đổ, lửa loang ra đất, và phía đó tối lại.', 5, 2);
+  } else if (ch === 3) {
+    const p = place(2.2, 5.0, 6.4); if (p) addHull(p.x, p.z, p.a + Math.PI / 2);
+    if (!F.water) say('arena3', 'Colossus ngập nước biển! Sóng sẽ quét qua sân: giơ khiên cho vững, hoặc lăn qua. Sóng cuốn cả tụi nó vào bẫy!', 5, 2);
+  } else if (ch === 4) {
+    for (let j = 0; j < tune.statue_count; j++) { const p = place(0.6, 3.6, 6.6); if (p) addStatue(p.x, p.z, p.a + Math.PI); }
+    say('arena4', 'Vườn của Hoàng đế. Hất địch vào tượng đá thì tượng đổ đè lên tụi nó. Đám đông mê mày thì Hoàng đế ném rượu xuống!', 5, 2);
+  } else {
+    for (let j = 0; j < tune.shadow_count; j++) { const r = tune.shadow_r * (0.8 + lr() * 0.4), p = place(r * 1.2, 2.0, 7.4 - r * tune.shadow_grow); if (p) addShade(p.x, p.z, r); }
+    say('arena5', 'Nhật thực! Bóng tối loang trên cát, càng lúc càng rộng. Đứng trong bóng là mất máu, tụi nó đứng trong đó thì hồi sức: kéo tụi nó ra!', 5, 2);
+  }
+  if (ch === 5) eclipseLight(0);
+  events.push({ type: 'arena', ch, props: props.length, muds: muds.length, shades: shades.length });
+}
+/** Hurt by the arena itself: Kael (a roll goes through it) or a foe (hurt more, a boss less). */
+function arenaHurt(f, dmg, label, ox, oz, knock, light) {
+  if (f === state.kael) return trapHurtKael(dmg, label, ox, oz, knock, light);
+  trapHurt(f, dmg, label, ox, oz, knock, !light); return true;
+}
+/** Someone thrown hard against a prop: it hurts, and a torch or a statue goes over the way they flew. */
+function propSlam(p, f, dx, dz) {
+  const s = state;
+  if (!KIND[f.kind].chariot) arenaHurt(f, tune.slam_dmg, { torch: 'ĐẬP VÀO ĐUỐC!', statue: 'ĐẬP VÀO TƯỢNG!', hull: 'ĐẬP VÀO THUYỀN!' }[p.kind], p.x, p.z, 0, false);
+  sfx('thud'); burst(f.x, 1.0, f.z, 'dust', 8, 2.5, 2); shake = Math.max(shake, 0.25);
+  if ((p.kind === 'torch' || p.kind === 'statue') && !p.down) {
+    const d = Math.hypot(dx, dz) || 1; p.down = true; p.fall = 0; p.fdx = dx / d; p.fdz = dz / d;
+    popup(p.kind === 'torch' ? 'ĐUỐC ĐỔ!' : 'TƯỢNG ĐỔ!', p.x, p.z, '#F4EBD0', 26); sfx('stone');
+    events.push({ type: 'propfall', kind: p.kind });
+  }
+}
+const _ax = new THREE.Vector3();
+function tipOver(p, ang) { _ax.set(p.fdz, 0, -p.fdx).normalize(); if (p.kind === 'statue') _ax.applyAxisAngle(new THREE.Vector3(0, 1, 0), -p.g.rotation.y); p.pv.quaternion.setFromAxisAngle(_ax, ang); }
+function updateArenaDress(dt) {
+  const s = state, k = s.kael, on = s.phase === 'fight' && scene === 'play' && s.dressOn;
+  const F = FIGHTS[s.fight], ch = clamp(F.ch, 1, 5);
+  const who = [k, ...s.foes].filter(f => alive(f) && f.state !== 'enter' && f.state !== 'gatewait');
+  for (const f of who) if (f.slamCd > 0) f.slamCd -= dt;
+  const fast = f => Math.hypot(f.kbx, f.kbz) > tune.slam_speed;
+  // the stake fence of Hố Cát
+  if (ch === 1 && on) for (const f of who) {
+    if (KIND[f.kind].chariot || f.slamCd > 0 || !fast(f) || Math.hypot(f.x, f.z) < AR() - f.r - 0.08) continue;
+    f.slamCd = 0.8; arenaHurt(f, tune.stake_dmg, 'CỌC NHỌN!', f.x * 2, f.z * 2, 6, false); sfx('thud'); burst(f.x, 1.0, f.z, 'spark', 6, 3, 2);
+  }
+  // props: walked round; thrown against hard, they hurt, and torches and statues go over
+  for (const p of props) {
+    if (p.down && p.kind !== 'hull') continue;
+    for (const f of who) {
+      const D = KIND[f.kind], dx = f.x - p.x, dz = f.z - p.z, d = Math.hypot(dx, dz), min = p.r + f.r;
+      if (d >= min || d < 1e-4) continue;
+      const vx = D.chariot ? f.x - f.px : f.kbx, vz = D.chariot ? f.z - f.pz : f.kbz;
+      if (on && !(f.slamCd > 0) && (D.chariot ? p.kind !== 'hull' : fast(f))) { f.slamCd = 0.8; propSlam(p, f, vx, vz); }
+      if (!D.chariot) { f.x = p.x + dx / d * min; f.z = p.z + dz / d * min; }
+    }
+  }
+  for (const p of props) {
+    if (p.kind === 'torch') {
+      const fl = 1 + Math.sin(vt * 13 + p.x) * 0.12 + Math.sin(vt * 7.3 + p.z) * 0.08;
+      if (p.down) { p.fall = Math.min(1, p.fall + dt / 0.45); tipOver(p, p.fall * p.fall * 1.45); p.glow = Math.max(0, p.glow - dt * 1.5); if (p.fall >= 1 && !p.fires) { p.fires = [0.9, 1.7, 2.5].map(u => ({ x: p.x + p.fdx * u, z: p.z + p.fdz * u })); p.fireT = tune.torch_fire_time; p.fo.visible = p.fi.visible = false; burst(p.x + p.fdx * 2.5, 0.3, p.z + p.fdz * 2.5, 'fire', 14, 2.5, 3); } }
+      p.fo.scale.set(1, fl, 1); p.fi.scale.set(1, 2 - fl, 1);
+      p.light.intensity = tune.torch_light * fl * p.glow;
+      if (p.fires && p.fireT > 0) {
+        p.fireT -= dt;
+        for (const z of p.fires) if (deco() < 0.5) burst(z.x + (deco() - 0.5) * 0.8, 0.12, z.z + (deco() - 0.5) * 0.8, deco() > 0.3 ? 'fire' : 'ember', 1, 0.5, 3.4);
+        if (on) for (const f of who) {
+          if ((f.y || 0) > 0.4 || s.t - (p.cd.get(f) ?? -99) < 0.5 || !p.fires.some(z => Math.hypot(f.x - z.x, f.z - z.z) < 0.75)) continue;
+          p.cd.set(f, s.t); if (f !== k) f.burn = 1;
+          arenaHurt(f, tune.torch_fire_dmg, 'BỎNG!', 0, 0, 0, true);
+        }
+      }
+    } else if (p.kind === 'statue' && p.down && p.fall < 1) {
+      p.fall = Math.min(1, p.fall + dt / 0.5); tipOver(p, p.fall * p.fall * 1.5);
+      if (p.fall >= 1) { // it lands: whoever is under it is crushed
+        const ex = p.x + p.fdx * tune.statue_len, ez = p.z + p.fdz * tune.statue_len;
+        burst(ex, 0.4, ez, 'dust', 20, 3.5, 2.5); burst(ex, 0.6, ez, 'stone', 10, 3, 2.5); sfx('quake'); shake = Math.max(shake, 0.5); groundRing(ex, ez, 0xC8C0AE, 0.4, 2.2, 0.4, 0.6);
+        for (const f of who) {
+          const rx = f.x - p.x, rz = f.z - p.z, al = rx * p.fdx + rz * p.fdz, pp = Math.abs(rx * p.fdz - rz * p.fdx);
+          if (al < 0.3 || al > tune.statue_len + 0.3 || pp > 0.55 + f.r * 0.5) continue;
+          arenaHurt(f, tune.statue_dmg, 'TƯỢNG ĐÈ!', p.x, p.z, 6, false);
+        }
+      }
+    }
+  }
+  // the Colossus's waves: they gather at the wall, then sweep the sand
+  if (ch === 3 && on && !F.water) {
+    if (!s.wave) {
+      s.waveT -= dt;
+      if (s.waveT <= 0) {
+        s.waveT = tune.wave_gap; const a = rng() * TAU;
+        s.wave = { dx: Math.sin(a), dz: Math.cos(a), a, d: -FENCE_R + 0.4, t: 0, go: false, hit: new Set() };
+        popup('SÓNG!', -Math.sin(a) * 7, -Math.cos(a) * 7, '#A8D4E0', 30); sfx('wave');
+        say('wavecome', 'Sóng tới! Giơ khiên cho vững, hoặc lăn qua!', 2.6, 2, 30);
+        events.push({ type: 'wave' });
+      }
+    } else {
+      const w = s.wave; w.t += dt;
+      if (!w.go && w.t >= tune.wave_warn) { w.go = true; sfx('wave'); }
+      if (w.go) w.d += tune.wave_speed * dt;
+      if (!waveG) {
+        waveG = new THREE.Group();
+        waveG.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshPhongMaterial({ color: 0x6EB8CC, transparent: true, opacity: 0.78, shininess: 90, specular: 0xFFFFFF })));
+        const foam = new THREE.Mesh(new THREE.BoxGeometry(1, 0.18, 1.15), new THREE.MeshBasicMaterial({ color: 0xF2FAFC })); foam.position.y = 0.55; waveG.add(foam);
+        scene3.add(waveG);
+      }
+      const half = Math.sqrt(Math.max(0.01, FENCE_R * FENCE_R - w.d * w.d)), h = w.go ? 1.1 : 1.1 * Math.min(1, w.t / tune.wave_warn);
+      waveG.visible = true; waveG.position.set(w.dx * w.d, h / 2, w.dz * w.d); waveG.rotation.y = w.a; waveG.scale.set(half * 2, h, 0.7);
+      if (deco() < 0.5) { const u = (deco() - 0.5) * 2 * half; burst(w.dx * w.d + Math.cos(w.a) * u, h, w.dz * w.d - Math.sin(w.a) * u, 'water', 1, 1.5, 2.5); }
+      if (w.go) for (const f of who) {
+        const D = KIND[f.kind];
+        if (w.hit.has(f) || D.chariot || Math.abs(f.x * w.dx + f.z * w.dz - w.d) > 0.45 + f.r * 0.5) continue;
+        w.hit.add(f);
+        if (f === k && k.state === 'roll' && k.t < tune.roll_iframes) continue;
+        const push = tune.wave_push * (f === k && k.blocking ? tune.wave_block_mult : 1) * (D.boss ? tune.knock_boss_mult : 1);
+        f.kbx += w.dx * push; f.kbz += w.dz * push; burst(f.x, 0.5, f.z, 'water', 6, 2, 2);
+        if (f !== k && !D.boss && !D.beast) { f.state = 'hitstun'; f.t = 0; f.move = null; f.red = 0; f.tele = null; f.stunT = 0.45; popup('SÓNG CUỐN!', f.x, f.z, '#A8D4E0', 20); }
+        events.push({ type: 'wavehit', kind: f.kind });
+      }
+      if (w.d > FENCE_R - 0.3) { s.wave = null; waveG.visible = false; }
+    }
+  } else if (waveG && waveG.visible) waveG.visible = false;
+  // the Emperor's wine, thrown down while the crowd is with Kael
+  if (ch === 4 && on && s.fame >= tune.gift_fame && extras.emperor) {
+    s.giftT -= dt;
+    if (s.giftT <= 0) {
+      s.giftT = tune.gift_gap;
+      const a = rng() * TAU, d = 2 + rng() * 1.5; let x = k.x + Math.sin(a) * d, z = k.z + Math.cos(a) * d;
+      const r = Math.hypot(x, z), R = AR() - 1; if (r > R) { x *= R / r; z *= R / r; }
+      throwFrom(extras.emperor, x, z, 'coin', 1.3, () => spawnGift(x, z));
+      say('gift', 'Hoàng đế ném rượu xuống cho mày! Nhặt lấy mà hồi sức!', 3, 2, 40);
+    }
+  }
+  // Nhật Thực: the light goes, the shadows spread; they bleed Kael and feed his foes
+  if (ch === 5 && on) {
+    s.eclipse = Math.min(1, s.eclipse + dt / tune.eclipse_time); eclipseLight(s.eclipse);
+    const sc = 1 + (tune.shadow_grow - 1) * s.eclipse;
+    for (const m of shades) {
+      m.g.scale.set(sc, 1, sc); m.g.children[0].material.opacity = 0.35 + Math.sin(vt * 3 + m.x) * 0.12;
+      if (deco() < 0.25) { const q = deco() * TAU, d = deco() * m.r * sc; burst(m.x + Math.sin(q) * d, 0.1, m.z + Math.cos(q) * d, 'shadow', 1, 0.4, 1.6); }
+    }
+    for (const f of who) {
+      if ((f.y || 0) > 0.4 || !inShade(f)) continue;
+      if (f === k) {
+        const m = shades[0]; if (s.t - (m.cd.get(k) ?? -99) < tune.shadow_tick) continue;
+        m.cd.set(k, s.t); arenaHurt(k, tune.shadow_dmg, 'BÓNG TỐI!', 0, 0, 0, true);
+        say('shadein', 'Ra khỏi bóng tối, nhóc! Nó hút máu mày!', 2.4, 2, 20);
+      } else if (f.hp < f.maxHp) {
+        f.hp = Math.min(f.maxHp, f.hp + tune.shadow_heal * dt);
+        if (deco() < 0.08) burst(f.x, 1.2, f.z, 'shadow', 2, 0.8, 2);
+      }
+    }
+  }
+  for (let i = gifts.length - 1; i >= 0; i--) {
+    const j = gifts[i]; j.t += dt; j.g.rotation.y += dt * 1.5; j.g.position.y = 0.05 + Math.abs(Math.sin(j.t * 3)) * 0.12;
+    if (on && alive(k) && Math.hypot(k.x - j.x, k.z - j.z) < 0.9) {
+      const h = Math.min(tune.gift_heal, k.maxHp - k.hp); k.hp += h; sfx('coin'); sfx('cheer', 0.8); burst(j.x, 0.8, j.z, 'gold', 12, 2.5, 2.5);
+      popup('+' + Math.round(h) + ' RƯỢU CỦA HOÀNG ĐẾ', k.x, k.z, '#F6D66A', 22); events.push({ type: 'gift', heal: Math.round(h) });
+      scene3.remove(j.g); gifts.splice(i, 1);
+    } else if (j.t > tune.gift_life) { scene3.remove(j.g); gifts.splice(i, 1); }
+  }
+}
+/** The eclipse's light: e from 0 (the fight begins) to 1 (the sun gone), darkening the chapter's own look. */
+function eclipseLight(e) {
+  const L = ARENA_LOOK[4], d = 1 - tune.eclipse_dim * e;
+  sun.intensity = L.sunI * d; hemi.intensity = L.hemiI * (1 - tune.eclipse_dim * 0.7 * e);
+}
+// ---- Tháp Sinh Tử: chương 6, three floors Valerian raises out of the arena -----------------------
+/** The tower's light: Tầng Máu and Tầng Thần inside its dark walls; on the bridge, the fire under it. */
+const TOWER_LOOK = [
+  { sky: 0x2A1828, fog: 0x1C0E18, bg: 0x0E0810, sun: 0xC86A8A, sunI: 0.7, hemi: 0x6A3A5A, hemiI: 0.75, ground: 0x2A1020, near: 12, far: 55 },
+  { sky: 0x4A1A10, fog: 0x3A1408, bg: 0x1A0806, sun: 0xFF9A5A, sunI: 1.2, hemi: 0x9A5A6A, hemiI: 1.0, ground: 0xFF6A2A, near: 22, far: 95 },
+];
+const arenaParts = []; // all buildArena made (and the stands' boxes), hidden while Kael is in the tower
+let towerG = null, towerOn = false, lightSword = null;
+const SHADE_C = new THREE.Color(0x24143A);
+const SHADE_OF = { 4: 'grull', 9: 'sabina', 23: 'mentor', 29: 'golden' }; // the bosses Kael may have killed, by fight
+function buildTower() {
+  towerG = { base: new THREE.Group(), top: new THREE.Group(), bands: [], braziers: [] };
+  const B = towerG.base, T = towerG.top, R = FENCE_R + 0.3;
+  // Tầng Máu and Tầng Thần: black stone veined with blood, a ring of runes, a round wall, purple fire in iron baskets
+  const fl = new THREE.Mesh(new THREE.CircleGeometry(R + 0.2, 64), mat(0x3A3038)); fl.rotation.x = -Math.PI / 2; fl.receiveShadow = true; B.add(fl);
+  const vein = new THREE.MeshBasicMaterial({ color: 0x7A1420 }), rune = new THREE.MeshBasicMaterial({ color: 0x8A4AD8, transparent: true, opacity: 0.6, depthWrite: false });
+  for (const [r0, r1] of [[6.4, 6.62], [2.9, 3.05]]) { const g = new THREE.Mesh(new THREE.RingGeometry(r0, r1, 64), rune); g.rotation.x = -Math.PI / 2; g.position.y = 0.015; B.add(g); }
+  for (let j = 0; j < 14; j++) {
+    const a = j / 14 * TAU + hash2(j, 3) * 0.3, L = 2.5 + hash2(j, 7) * 4.5, d0 = 1 + hash2(j, 9) * 2, g = new THREE.Group(); g.rotation.y = a;
+    const v = new THREE.Mesh(new THREE.PlaneGeometry(0.08, L), vein); v.rotation.x = -Math.PI / 2; v.position.set(0, 0.012, d0 + L / 2); g.add(v); B.add(g);
+  }
+  const wall = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 9, 56, 1, true), mat(0x2E262C, { side: THREE.BackSide })); wall.position.y = 4.5; B.add(wall);
+  const dado = new THREE.Mesh(new THREE.CylinderGeometry(R - 0.05, R - 0.05, 0.5, 56, 1, true), mat(0x4A3A44, { side: THREE.BackSide })); dado.position.y = 1.2; B.add(dado);
+  const pierM = mat(0x3A3036);
+  for (let j = 0; j < 12; j++) { const a = (j + 0.5) / 12 * TAU, p = at(box(0.6, 9, 0.5, pierM), Math.cos(a) * (R - 0.15), 4.5, Math.sin(a) * (R - 0.15)); p.rotation.y = -a; B.add(p); }
+  const iron = mat(0x2A2420), fo = new THREE.MeshBasicMaterial({ color: 0x9A5AF0 }), fi = new THREE.MeshBasicMaterial({ color: 0xE0C8FF });
+  for (let j = 0; j < 6; j++) {
+    const a = (j + 0.25) / 6 * TAU, g = new THREE.Group(); g.position.set(Math.cos(a) * (R - 0.55), 0, Math.sin(a) * (R - 0.55));
+    g.add(at(cyl(0.08, 0.12, 1.6, 8, iron), 0, 0.8, 0)); g.add(at(cyl(0.36, 0.18, 0.3, 10, iron), 0, 1.7, 0));
+    const o = at(new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.7, 6), fo), 0, 2.15, 0), n = at(new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.45, 6), fi), 0, 2.05, 0);
+    g.add(o, n); B.add(g);
+    let l = null; if (j % 2 === 0) { l = new THREE.PointLight(0xA060FF, 6, 12, 1.6); l.position.set(g.position.x * 0.9, 2.6, g.position.z * 0.9); B.add(l); }
+    towerG.braziers.push({ o, n, l, ph: j * 1.3 });
+  }
+  // Cầu Sinh Tử: the bridge at the top (its bands are laid by buildBands), the sea of fire far below
+  const sea = new THREE.Mesh(new THREE.CircleGeometry(90, 48), new THREE.MeshBasicMaterial({ color: 0xE0521A })); sea.rotation.x = -Math.PI / 2; sea.position.y = -9; T.add(sea);
+  const glow = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshBasicMaterial({ color: 0xFFB04A, transparent: true, opacity: 0.35, depthWrite: false })); glow.rotation.x = -Math.PI / 2; glow.position.y = -8.9; T.add(glow); towerG.glow = glow;
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 4.6, 8.6, 20), mat(0x2A2026)); stem.position.y = -4.8; T.add(stem);
+  const spanM = mat(0x3A2E32), postM = mat(0x4A3A3E);
+  for (const sx of [-1, 1]) { // the spans the bridge once had, broken off over the fire
+    const sp = at(box(6, 0.5, 2.2, spanM), sx * 11.8, -0.3, 0); sp.rotation.z = sx * 0.06; T.add(sp);
+    for (let j = 0; j < 4; j++) T.add(at(box(0.3, 0.9, 0.3, postM), sx * (9.2 + j * 1.6), 0.15, j % 2 ? 1.0 : -1.0));
+  }
+  const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1.6, 0), mat(0x4A3A3A)); rock.scale.set(1.2, 0.7, 1.1); rock.position.set(0, 1.2, -13); T.add(rock); towerG.rock = rock; // Lyra's rock
+  const ll = new THREE.PointLight(0xFFD8A0, 4, 6, 1.6); ll.position.set(0, 3.8, -12); T.add(ll);
+  const fire = new THREE.PointLight(0xFF6A2A, 8, 30, 1.2); fire.position.set(0, -4, 0); T.add(fire);
+  B.visible = T.visible = false; scene3.add(B, T);
+  lightSword = new THREE.PointLight(0xFFE7A0, 0, 8, 1.5); scene3.add(lightSword);
+  buildMirrors();
+}
+/** The bridge: rings of stone from bridge_r0 inward, bridge_band wide, the middle one (bridge_min) never falls. */
+function buildBands() {
+  for (const b of towerG.bands) { towerG.top.remove(b.m); if (b.seam) towerG.top.remove(b.seam); }
+  towerG.bands = [];
+  let ro = tune.bridge_r0;
+  for (let j = 0; j < 20; j++) {
+    const last = ro <= tune.bridge_min + 1e-6, ri = last ? 0 : Math.max(tune.bridge_min, ro - tune.bridge_band), M = mat(j % 2 ? 0x4A3C40 : 0x56464C, { side: THREE.DoubleSide });
+    const g = last ? new THREE.CylinderGeometry(ro, ro * 0.8, 0.9, 40)
+      : new THREE.LatheGeometry([new THREE.Vector2(ri, -0.9), new THREE.Vector2(ro, -0.9), new THREE.Vector2(ro, 0), new THREE.Vector2(ri, 0)], 56);
+    const m = new THREE.Mesh(g, M); if (last) m.position.y = -0.45; m.receiveShadow = true; towerG.top.add(m);
+    let seam = null;
+    if (!last) { // the crack between two bands, the fire showing through it
+      seam = new THREE.Mesh(new THREE.RingGeometry(ri - 0.03, ri + 0.05, 56), new THREE.MeshBasicMaterial({ color: 0xFF6A2A, transparent: true, opacity: 0.7, depthWrite: false }));
+      seam.rotation.x = -Math.PI / 2; seam.position.y = 0.012; towerG.top.add(seam);
+    }
+    towerG.bands.push({ m, seam, ro, ri, state: 'ok', t: 0, v: 0, M, last });
+    if (last) break; ro = ri;
+  }
+}
+/** A fight's place: the arena, or a floor of the tower (its look, its walls or its bridge; nobody in the stands). */
+function setTower(i) {
+  const s = state, F = FIGHTS[i], fl = F.tower || 0;
+  if (fl && !towerG) buildTower();
+  ringR = 0; s.bridge = null; s.lightT = 0; if (lightSword) lightSword.intensity = 0;
+  if (!fl) { if (towerOn) leaveTower(F.ch); return; }
+  towerOn = true; for (const o of arenaParts) o.visible = false;
+  towerG.base.visible = fl < 3; towerG.top.visible = fl === 3;
+  placeMirrors(fl); Object.assign(s, { pulseT: 0, tauntT: tune.tower_pulse_gap * 0.5, whisperT: 2, heartT: 0, beatT: 9 });
+  const L = TOWER_LOOK[fl === 3 ? 1 : 0]; arenaCh = -1;
+  if (skyMesh) skyMesh.material.color.set(L.sky);
+  scene3.fog.color.set(L.fog); scene3.fog.near = L.near; scene3.fog.far = L.far; scene3.background.set(L.bg);
+  sun.color.set(L.sun); sun.intensity = L.sunI; hemi.color.set(L.hemi); hemi.intensity = L.hemiI; hemi.groundColor.set(L.ground);
+  if (brennus) FIG.get(brennus).root.visible = false;
+  for (const w in extras) FIG.get(extras[w]).root.visible = false;
+  if (fl === 2) { s.blade = 0; for (const g of GOD_ORDER) s.learned[g] = true; s.divine = tune.tower_divine_start; } // the floor drinks Kael's Thần Lực down to this
+  if (fl === 3) {
+    buildBands(); ringR = tune.bridge_r0; s.bridge = { c: 0, t: tune.bridge_crumble_gap, warn: -1 };
+    s.light = Math.min(90, (s.blade || 0) * tune.light_per_shard);
+    const l = extras.lyra; Object.assign(l, { x: 0, y: 2.3, z: -13, px: 0, pz: -13, yaw: 0, state: 'idle' }); FIG.get(l).root.visible = true;
+  }
+}
+/** Back down to the arena: its parts shown, the chapter's light (ch), the tower hidden. */
+function leaveTower(ch) {
+  towerOn = false; ringR = 0;
+  for (const o of arenaParts) o.visible = true;
+  if (towerG) towerG.base.visible = towerG.top.visible = false;
+  for (const m of mirrors) m.g.visible = false;
+  hemi.groundColor.set(0x5A4835); scene3.fog.near = 55; scene3.fog.far = 190; arenaCh = -1; applyArena(ch);
+}
+/** The finale: the tower sinks back into the arena, the sun comes back over Aurelia, the stands fill again. */
+function towerFall() {
+  const s = state, k = s.kael;
+  leaveTower(3); s.lightT = 0; if (lightSword) lightSword.intensity = 0;
+  for (const f of s.foes) FIG.get(f).root.visible = false;
+  Object.assign(k, { x: 0, z: 1.2, px: 0, pz: 1.2, yaw: Math.PI, y: 0, vy: 0 });
+  for (const w of ['varro', 'herald']) FIG.get(extras[w]).root.visible = true;
+  if (s.sabinaAlly) FIG.get(extras.sabina).root.visible = true;
+  if (brennus && !s.brennusDead) FIG.get(brennus).root.visible = true;
+  flash(0, 3, 0, 8, 0xFFF2D0, false, 0.5); shake = 0.8; sfx('quake'); sfx('cheer', 1.4); crowd.excite = 1.3;
+  events.push({ type: 'towerfall' });
+}
+/** Tầng Máu's foes: two shadows of the ladder's first fighters, and one of every boss Kael killed. */
+const SHADE_BASE = ['shield', 'dual', 'net', 'archer'];
+function shadeKinds() { const o = SHADE_BASE.slice(); for (const i in SHADE_OF) if (state.choices[i] === 'giet') o.push(SHADE_OF[i]); return o; }
+/** A fighter made a shadow: dark, half seen through; a boss's shadow with less of its health. */
+function makeShade(e, hpMult = 1) {
+  e.shade = true; e.hp *= hpMult; e.maxHp = e.hp;
+  for (const m of FIG.get(e).mats) { m.color.lerp(SHADE_C, 0.72); m.transparent = true; m.opacity = tune.shade_opacity; m.needsUpdate = true; }
+  shadeEyes(FIG.get(e));
+}
+const eyeGeo = new THREE.SphereGeometry(0.045, 8, 6), eyeMat = new THREE.MeshBasicMaterial({ color: 0xFF2A2A });
+/** Two red points where a shadow's eyes were (on a model's head, where the gold mask sits). */
+function shadeEyes(fig) {
+  if (!fig || !fig.modelFig || fig.eyes) return;
+  fig.eyes = new THREE.Group(); fig.eyes.position.z = 0.06;
+  for (const sx of [-1, 1]) fig.eyes.add(at(new THREE.Mesh(eyeGeo, eyeMat), sx * 0.1, 0.2, 0.33));
+  fig.head.add(fig.eyes);
+}
+/** A shadow rises out of the tower's floor: where it is told, else somewhere clear of Kael. */
+function spawnShade(kind, x, z) {
+  const s = state, k = s.kael;
+  if (x === undefined) for (let n = 0; n < 12; n++) { const a = rng() * TAU, d = 2.5 + rng() * Math.max(0.5, AR() - 3.6); x = Math.sin(a) * d; z = Math.cos(a) * d; if (Math.hypot(x - k.x, z - k.z) > 2.6) break; }
+  const e = newFighter(kind, false, 5); makeShade(e);
+  Object.assign(e, { x, z, px: x, pz: z, y: -1.6, yaw: Math.atan2(k.x - x, k.z - z), state: 'circle', t: 0, thinkT: 1.4 + rng() * 0.8 });
+  burst(x, 0.3, z, 'shadow', 20, 2.5, 3); flash(x, 1, z, 2, 0x6A5AB8, false, 0.25); sfx('shadow');
+  s.foes.push(e); return e;
+}
+/** The tower's foes wait where they stand (no gate up here): shadows across the floor, the idols round it, Valerian before Kael. */
+function placeTowerFoes(F) {
+  const s = state, n = s.foes.length;
+  s.foes.forEach((e, j) => {
+    let x, z;
+    if (F.tower === 2) { const a = Math.PI + (j - 2) * 0.95; x = Math.sin(a) * 5.6; z = Math.cos(a) * 5.6; e.hx = x; e.hz = z; e.thinkT = 2.2 + j * tune.idol_think / 5; }
+    else if (F.tower === 3) { x = 0; z = -4.6; e.dark = true; e.thinkT = 1.6; }
+    else { const a = Math.PI + (n > 1 ? (j / (n - 1) - 0.5) * 2.2 : 0); x = Math.sin(a) * 5.4; z = Math.cos(a) * 5.4; makeShade(e, KIND[e.kind].boss ? tune.shade_hp_mult : 1); e.thinkT = 1.2 + j * 0.5; }
+    Object.assign(e, { x, z, px: x, pz: z, yaw: Math.atan2(-x, 3.4 - z), state: 'circle', t: 0 });
+  });
+}
+/** A corrupted idol: a robed god of grey stone on a plinth, arms raised, cracked with purple light, its sign over its head. */
+function makeIdol(god) {
+  const G = GODS[god], mats = [], root = new THREE.Group();
+  const M = c => { const k = new THREE.MeshPhongMaterial({ color: c, shininess: 12 }); mats.push(k); return k; };
+  const stone = M(0x5A5060), dark = M(0x2E2834);
+  const crack = new THREE.MeshBasicMaterial({ color: 0xB070FF }), emb = new THREE.MeshBasicMaterial({ color: new THREE.Color(G.css) });
+  root.add(at(cyl(0.82, 0.95, 0.5, 10, dark), 0, 0.25, 0));
+  const body = new THREE.Group(); body.position.y = 0.5; root.add(body);
+  body.add(at(cyl(0.34, 0.55, 1.6, 10, stone), 0, 0.8, 0)); body.add(at(cyl(0.44, 0.34, 0.35, 10, stone), 0, 1.72, 0));
+  const head = new THREE.Group(); head.position.y = 2.1; body.add(head); head.add(new THREE.Mesh(new THREE.IcosahedronGeometry(0.27, 1), stone));
+  for (const sx of [-1, 1]) { const arm = at(box(0.16, 0.9, 0.16, stone), sx * 0.5, 2.05, 0); arm.rotation.z = sx * 2.6; body.add(arm); }
+  for (let j = 0; j < 8; j++) { const c = at(box(0.045, 0.35 + hash2(j, 1) * 0.5, 0.045, crack), Math.sin(j * 2.3) * 0.44, 0.45 + hash2(j, 2) * 1.35, Math.cos(j * 2.3) * 0.44); c.rotation.z = (hash2(j, 4) - 0.5) * 1.2; c.rotation.y = j * 2.3; body.add(c); }
+  const sign = new THREE.Group(); sign.position.y = 2.9; body.add(sign);
+  if (god === 'terrak') sign.add(new THREE.Mesh(new THREE.OctahedronGeometry(0.26, 0), emb));
+  else if (god === 'fulmen') for (let j = 0; j < 3; j++) { const b = at(box(0.09, 0.3, 0.09, emb), (j % 2 ? -0.07 : 0.07), 0.22 - j * 0.22, 0); b.rotation.z = j % 2 ? -0.6 : 0.6; sign.add(b); }
+  else if (god === 'ignar') sign.add(new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 6), emb));
+  else if (god === 'thalassa') sign.add(new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.06, 6, 18), emb));
+  else sign.add(new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.06, 6, 18, Math.PI * 1.5), emb));
+  root.scale.setScalar(1.15); scene3.add(root);
+  return { root, head, mats, body, sign, crack, idol: true, stars: null, aura: null, trail: null };
+}
+/** An idol's look from its state: the cracks pulse, faster as it casts; gone once it breaks. */
+function idolPose(fig, f) {
+  fig.root.visible = alive(f);
+  if (!alive(f)) return;
+  const casting = f.state === 'attack' && f.move && f.t < f.move.windup + f.move.active, p = 0.5 + 0.5 * Math.sin(vt * (casting ? 16 : 3) + f.id);
+  fig.crack.color.setRGB(0.45 + 0.35 * p, 0.2 + 0.15 * p, 0.8 + 0.2 * p);
+  fig.sign.rotation.y = vt * 1.6; fig.sign.position.y = 2.9 + Math.sin(vt * 2 + f.id) * 0.06; fig.sign.scale.setScalar(casting ? 1.25 + 0.25 * p : 1);
+}
+/** A blow on an idol: only its own god's spell counts. */
+function idolHit(e, k, m) {
+  const s = state, G = GODS[KIND[e.kind].idol];
+  if (m.god === KIND[e.kind].idol) { breakIdol(e); return; }
+  sfx('clang'); burst((e.x + k.x) / 2, 1.2, (e.z + k.z) / 2, 'spark', 5, 3); if (!m.magic) m.recover += 0.15; e.flash = 0.4;
+  if (s.t - (e.noT ?? -9) > 0.9) { e.noT = s.t; popup('CHỈ PHÉP ' + G.name, e.x, e.z, G.css, 22); }
+  say('idolno', `Kiếm không làm vỡ được tượng thần! Phải dùng đúng phép của nó: ${line('phím ' + G.n, 'biểu tượng ' + G.n)}, ${G.name}.`, 3.5, 2, 9);
+}
+/** An idol breaks: its god's light goes into the father's hilt (a shard), Thần Lực back. */
+function breakIdol(e) {
+  const s = state, god = KIND[e.kind].idol, G = GODS[god];
+  e.lastBlow = {}; s.blade = (s.blade || 0) + 1;
+  for (const o of s.foes) if (o !== e && alive(o) && KIND[o.kind].idol) popup('NỔI GIẬN', o.x, o.z, '#C890FF', 20);
+  burst(e.x, 1.4, e.z, 'stone', 22, 4.5, 3); burst(e.x, 1.6, e.z, G.part, 26, 4, 3); burst(e.x, 1.2, e.z, 'shadow', 18, 3, 2.5);
+  flash(e.x, 1.8, e.z, 4, 0xFFF2D0, false, 0.4); groundRing(e.x, e.z, 0xFFE7A0, 0.5, 3.2, 0.5, 0.7);
+  sfx('quake'); sfx('cheer', 1.2); shake = 0.6; camPunch = 6; hitstop = 0.08; slowT = Math.max(slowT, 0.35);
+  addDivine(tune.idol_divine); fame(tune.fame_spell, 'TƯỢNG VỠ!', e.x, e.z);
+  s.banner = { text: `ÁNH SÁNG CỦA ${G.name} NHẬP VÀO THANH KIẾM · ${s.blade}/5`, t: 0, dur: 2.8 };
+  say('idol' + s.blade, s.blade < 5 ? `Tượng ${G.name} vỡ rồi! Chuôi kiếm của cha sáng lên một nấc. Còn ${5 - s.blade} tượng!` : 'Đủ năm vị thần! Chuôi kiếm của cha rực sáng: lên đỉnh tháp thôi!', 4, 3);
+  events.push({ type: 'idol', god, blade: s.blade });
+  if (!s.foes.some(o => o !== e && alive(o) && KIND[o.kind].idol)) { // the last idol: the floor's shadows go with it
+    s.hordeLeft = 0; for (const o of s.foes) o.riseT = 0; for (const o of s.foes) if (o !== e && alive(o)) { o.hp = 0; o.state = 'dead'; o.t = 0; o.move = null; o.tele = null; burst(o.x, 1, o.z, 'shadow', 12, 2, 2); }
+  }
+  killEnemy(e);
+}
+/** A parry on the bridge: the father's hilt fills with light (more for a merciful Kael); full, the Light Sword burns. */
+function lightGain() {
+  const s = state, k = s.kael;
+  if (FIGHTS[s.fight].tower !== 3 || s.lightT > 0) return;
+  s.light = Math.min(100, (s.light || 0) + tune.light_per_parry * (1 + tune.light_nghia_bonus * s.nghia));
+  popup('+ÁNH SÁNG', k.x, k.z + 0.3, '#FFF0B0', 22); burst(k.x, 1.3, k.z, 'gold', 8, 2, 2);
+  if (s.light >= 100) igniteLight();
+  else say('lightup', 'Đúng rồi! Mỗi lần phản đòn, chuôi kiếm của cha sáng thêm!', 2.6, 2, 20);
+  events.push({ type: 'lightgain', light: Math.round(s.light) });
+}
+function igniteLight() {
+  const s = state, k = s.kael;
+  s.light = 0; s.lightT = tune.light_time; s.lights = (s.lights || 0) + 1;
+  s.banner = { text: 'THÁNH KIẾM BỪNG SÁNG', t: 0, dur: 2.4 };
+  sfx('divineReady'); sfx('cheer', 1.2); slowT = Math.max(slowT, 0.5); shake = 0.5; camPunch = 6;
+  flash(k.x, 1.6, k.z, 5, 0xFFF2D0, false, 0.45); flash(k.x, 1.6, k.z, 3.5, 0xFFE7A0, true, 0.5); burst(k.x, 1.4, k.z, 'gold', 30, 4, 3); groundRing(k.x, k.z, 0xFFE7A0, 0.5, 5, 0.5, 0.8);
+  for (const e of s.foes) if (alive(e) && KIND[e.kind].dark) { e.state = 'dazed'; e.t = 0; e.stunT = tune.light_daze; e.move = null; e.red = 0; e.tele = null; popup('CHÓI MẮT!', e.x, e.z, '#FFF0B0', 26); }
+  for (const e of s.foes) if (alive(e) && e.shade && Math.hypot(e.x - k.x, e.z - k.z) < 4) { e.lastBlow = {}; killEnemy(e); } // shadows near him burn away
+  say('lit', 'THÁNH KIẾM! Bóng tối không che được hắn nữa: CHÉM, CHÉM, CHÉM!', 3.5, 4);
+  events.push({ type: 'light' });
+}
+/** Valerian at two thirds and one third of his health: a band of the bridge goes, shadows come up. */
+function towerPhase(e, n) {
+  const s = state;
+  crumbleBand();
+  for (let j = 0; j < tune.sorcerer_summon; j++) spawnShade('thug');
+  s.banner = { text: n === 2 ? 'VALERIAN GỌI BÓNG MA LÊN CẦU' : 'VALERIAN DỐC HẾT BÓNG TỐI', t: 0, dur: 2.6 };
+  if (n === 3) say('phase3', 'Hắn sắp gục rồi! Cầu vỡ dần: thắp thánh kiếm lần nữa, rồi KẾT LIỄU hắn bằng đòn nặng!', 4.5, 3);
+  events.push({ type: 'towerphase', n });
+}
+/** The outermost band still standing glows red: in bridge_warn it falls. */
+function crumbleBand() {
+  const s = state, b = s.bridge; if (!b || b.warn >= 0) return;
+  const band = towerG.bands[b.c]; if (!band || band.last) return;
+  b.warn = 0; sfx('warn'); sfx('stone');
+  popup('CẦU SẮP SỤP!', s.kael.x, s.kael.z, '#FF8A60', 30);
+  say('crumble', 'Vành cầu ngoài cùng đỏ lên: nó sắp sụp! Vào trong, ngay!', 3, 3, 8);
+  events.push({ type: 'crumble', band: b.c });
+}
+function dropBand(band) {
+  const s = state, b = s.bridge, k = s.kael;
+  band.state = 'fall'; band.t = 0; band.v = 0; band.M.emissive.setRGB(0.3, 0.05, 0);
+  b.c++; b.warn = -1; b.t = tune.bridge_crumble_gap; ringR = band.ri;
+  sfx('quake'); sfx('stone'); shake = 0.7; camPunch = 4;
+  for (let j = 0; j < 18; j++) { const a = j / 18 * TAU, d = (band.ri + band.ro) / 2; burst(Math.sin(a) * d, 0.2, Math.cos(a) * d, j % 3 ? 'stone' : 'dust', 2, 2.5, 2); }
+  for (const f of [k, ...s.foes]) {
+    if (!alive(f) || Math.hypot(f.x, f.z) <= band.ri - f.r * 0.3) continue;
+    if (f === k) { hurtKael(tune.bridge_fall_dmg, null, 0, false); popup('SUÝT RƠI XUỐNG BIỂN LỬA!', k.x, k.z, '#FF8A60', 26); burst(k.x, 0.4, k.z, 'fire', 10, 2, 3); }
+    else if (KIND[f.kind].fodder || f.shade) { f.lastBlow = {}; popup('RƠI XUỐNG!', f.x, f.z, '#FF8A60', 22); killEnemy(f); }
+  }
+  events.push({ type: 'bandfall', r: band.ri });
+}
+/** Each step in the tower: the braziers, the embers, the bridge crumbling, the Light Sword burning down. */
+function updateTower(dt) {
+  if (!towerOn || !towerG) return;
+  const s = state, k = s.kael, F = FIGHTS[s.fight], on = s.phase === 'fight' && scene === 'play';
+  towerDread(dt, on, F);
+  for (const q of towerG.braziers) { // purple fire that gutters out a moment, and flares red when he laughs
+    if (q.out > 0) q.out -= dt; else if (F.tower < 3 && on && deco() < dt * tune.tower_blackout) q.out = 0.8 + deco() * 1.8;
+    const lit = !(q.out > 0), red = s.pulseT > 0, fl = 1 + Math.sin(vt * 11 + q.ph) * 0.14 + Math.sin(vt * 6.7 + q.ph) * 0.08;
+    q.o.visible = q.n.visible = lit; q.o.scale.set(1, fl * (red ? 1.8 : 1), 1); q.n.scale.set(1, 2 - fl, 1);
+    q.o.material.color.setHex(red ? 0xFF3040 : 0x9A5AF0);
+    if (q.l) { q.l.intensity = lit ? 6 * fl * (red ? 2.2 : 1) : 0; q.l.color.setHex(red ? 0xFF2A3A : 0xA060FF); }
+  }
+  updateMirrors(F);
+  if (F.tower !== 3) return;
+  towerG.glow.material.opacity = 0.28 + Math.sin(vt * 1.7) * 0.1;
+  // embers rise on the far side of the bridge, away from the camera
+  if (deco() < 0.4) { const a = Math.atan2(-cam.x, -cam.z) + (deco() - 0.5) * 2.4, d = AR() + 0.3 + deco() * 2.5; burst(Math.sin(a) * d, 0.1, Math.cos(a) * d, deco() < 0.6 ? 'ember' : 'fire', 1, 0.4, 4); }
+  const b = s.bridge;
+  if (b) {
+    if (on && b.warn < 0 && towerG.bands[b.c] && !towerG.bands[b.c].last) { b.t -= dt; if (b.t <= 0) crumbleBand(); }
+    if (b.warn >= 0 && on) {
+      b.warn += dt; const band = towerG.bands[b.c], p = 0.5 + 0.5 * Math.sin(vt * (10 + b.warn * 8));
+      band.M.emissive.setRGB(0.55 * p + 0.15, 0.08 * p, 0.02);
+      if (deco() < 0.4) { const a = deco() * TAU, d = band.ri + deco() * (band.ro - band.ri); burst(Math.sin(a) * d, 0.1, Math.cos(a) * d, 'dust', 1, 1, 1.4); }
+      if (b.warn >= tune.bridge_warn) dropBand(band);
+    }
+  }
+  for (const band of towerG.bands) if (band.state === 'fall') {
+    band.t += dt; band.v += 9 * dt; band.m.position.y -= band.v * dt; band.m.rotation.x = Math.sin(band.t * 0.7) * 0.05 * band.t; if (band.seam) band.seam.visible = false;
+    if (band.t > 3) { band.state = 'gone'; band.m.visible = false; }
+  }
+  if (s.lightT > 0 && lightSword) {
+    if (scene === 'play') s.lightT -= dt;
+    lightSword.intensity = tune.light_glow * (0.85 + 0.15 * Math.sin(vt * 9)); lightSword.position.set(k.x, 1.8, k.z);
+    if (deco() < 0.35) burst(k.x + (deco() - 0.5) * 0.6, 1.0 + deco(), k.z + (deco() - 0.5) * 0.6, 'gold', 1, 0.8, 2.5);
+    if (s.lightT <= 0) { s.lightT = 0; lightSword.intensity = 0; popup('ÁNH SÁNG TẮT', k.x, k.z, '#C9C2B4', 22); say('lightout', 'Ánh sáng tắt rồi! Phản đòn tiếp để thắp lại!', 2.6, 2, 6); }
+  }
+}
+/** What Valerian says through the walls while Kael climbs. */
+const TAUNTS = [
+  () => 'Cả Aurelia đang xem ngươi qua gương của ta. Chết cho đẹp vào, con trai thợ rèn.',
+  () => 'Ta nghe tim ngươi đập. Nhanh quá. Sợ rồi à?',
+  () => 'Bóng ma không biết đau. Chém chúng bằng đòn nhẹ à? Chúng sẽ đứng dậy.',
+  () => 'Cha ngươi cũng từng đứng đây. Cũng run như thế.',
+  () => 'Đám đông muốn máu. Của ngươi hay của chúng, ta không quan tâm.',
+  () => 'Lyra đang khóc trên đỉnh tháp. Ngươi nghe thấy không?',
+  () => 'Mỗi giọt máu rơi trên sàn này là của ta. Rơi thêm đi.',
+  () => 'Ngươi leo càng cao, ngã càng đau.',
+];
+/** The tower's dread each step: shadows climbing out of the floor or standing again, his laugh and taunts, whispers, Kael's heart. */
+function towerDread(dt, on, F) {
+  const s = state, k = s.kael;
+  if (s.pulseT > 0) s.pulseT -= dt;
+  if (s.beatT < 9) s.beatT += dt;
+  for (const f of s.foes) {
+    if (f.y < 0 && !f.vy) f.y = Math.min(0, f.y + dt * tune.shade_climb);
+    if (!(f.riseT > 0) || f.state !== 'dead' || !on) continue;
+    const was = f.riseT; f.riseT -= dt;
+    if (deco() < 0.35) burst(f.x + (deco() - 0.5) * 0.8, 0.15, f.z + (deco() - 0.5) * 0.8, 'shadow', 1, 1, 1.6);
+    if (was > 0.6 && f.riseT <= 0.6) { sfx('shriek'); groundRing(f.x, f.z, 0x8A5AD8, 0.3, 1.8, 0.4, 0.55); }
+    if (f.riseT <= 0) riseShade(f);
+  }
+  if (!on) return;
+  s.tauntT -= dt;
+  if (s.tauntT <= 0) { // he laughs through the walls: the fires flare red, he says something
+    s.tauntT = tune.tower_pulse_gap * (F.tower === 3 ? 1.6 : 1) * (0.8 + deco() * 0.4);
+    if (F.tower < 3) { s.pulseT = 0.8; shake = Math.max(shake, 0.3); }
+    sfx('laugh');
+    const fresh = TAUNTS.map((t, j) => j).filter(j => s.said['taunt' + j] === undefined), j = fresh.length ? fresh[Math.floor(deco() * fresh.length)] : Math.floor(deco() * TAUNTS.length);
+    say('taunt' + j, TAUNTS[j](), 3.8, 1, 1, 'sorcerer');
+    events.push({ type: 'taunt' });
+  }
+  s.whisperT -= dt;
+  if (s.whisperT <= 0) { s.whisperT = tune.whisper_gap * (0.7 + deco() * 0.6); sfx('whisper'); }
+  const u = k.hp / k.maxHp;
+  if (alive(k) && u < tune.tower_heart_hp) { s.heartT -= dt; if (s.heartT <= 0) { s.heartT = 0.55 + 0.5 * u / tune.tower_heart_hp; s.beatT = 0; sfx('heart'); } } else s.heartT = 0;
+}
+/** A shadow cut down by a light blow stands again, once, with part of its health. */
+function riseShade(f) {
+  Object.assign(f, { riseT: 0, risen: true, hp: f.maxHp * tune.shade_rise_hp, state: 'circle', t: 0, thinkT: 0.7, fling: false, vy: 0, y: -0.9, move: null, tele: null, red: 0, lastBlow: {}, kbx: 0, kbz: 0 });
+  burst(f.x, 0.4, f.z, 'shadow', 22, 2.6, 3); flash(f.x, 1, f.z, 2.4, 0x6A5AB8, false, 0.3);
+  popup('NÓ ĐỨNG DẬY!', f.x, f.z, '#C8A8FF', 24);
+  say('rose', 'Nó đứng dậy rồi! Bóng ma bị đòn nhẹ hạ thì sẽ dậy lại: dứt điểm bằng đòn nặng, xoay kiếm, lao đâm hay phép!', 4.5, 3, 25);
+  events.push({ type: 'shaderise', kind: f.kind });
+}
+/** The edge of the screen in the tower: dark, red when he laughs, beating red with Kael's heart when he is near death. */
+function towerVignette() {
+  const s = state, k = s.kael, low = alive(k) && tune.tower_heart_hp > 0 ? clamp(1 - k.hp / k.maxHp / tune.tower_heart_hp, 0, 1) : 0;
+  const beat = low > 0 ? Math.max(0, 1 - (s.beatT ?? 9) * 3.5) : 0, red = s.pulseT > 0 ? 0.6 : 0;
+  const A = clamp(tune.tower_vignette + 0.35 * low * beat + 0.2 * red, 0, 1), rr = Math.round(10 + 150 * Math.max(low * (0.4 + 0.6 * beat), red)), bb = Math.round(16 * (1 - low));
+  const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.9);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.6, `rgba(${rr >> 1},0,${bb},${A * 0.35})`); g.addColorStop(1, `rgba(${rr},0,${bb},${A})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+// ---- the crowd's mirrors: Valerian lets the arena below watch the tower, and Kael sees them watching
+const mirrors = [], MIRROR_BG = new THREE.Color(0x140A1C);
+let mirrorRT = null, mirrorCam = null, mirrorN = 0, mirrorFresh = 0;
+function buildMirrors() {
+  const res = tune.mirror_res;
+  mirrorRT = [0, 1].map(() => new THREE.WebGLRenderTarget(res, res));
+  mirrorCam = new THREE.PerspectiveCamera(46, 1, FENCE_R + 0.4, 160);
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g2 = c.getContext('2d');
+  const rg = g2.createRadialGradient(64, 64, 26, 64, 64, 64); rg.addColorStop(0, 'rgba(40,10,60,0)'); rg.addColorStop(0.72, 'rgba(60,20,90,0.35)'); rg.addColorStop(1, 'rgba(130,60,210,0.95)');
+  g2.fillStyle = rg; g2.fillRect(0, 0, 128, 128); const vig = new THREE.CanvasTexture(c);
+  const rim = new THREE.MeshBasicMaterial({ color: 0x9A5AF0 }), back = new THREE.MeshBasicMaterial({ color: 0x120818 });
+  for (let j = 0; j < 6; j++) {
+    const g = new THREE.Group(), faceM = new THREE.MeshBasicMaterial({ map: mirrorRT[j % 2].texture, color: 0xE8D0FF, fog: false });
+    const bk = new THREE.Mesh(new THREE.CircleGeometry(1.16, 40), back); bk.position.z = -0.03;
+    const face = new THREE.Mesh(new THREE.CircleGeometry(1, 40), faceM);
+    const v = new THREE.Mesh(new THREE.CircleGeometry(1, 40), new THREE.MeshBasicMaterial({ map: vig, transparent: true, depthWrite: false, fog: false })); v.position.z = 0.01;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.07, 6, 40), rim);
+    g.add(bk, face, v, ring);
+    for (let i = 0; i < 12; i++) { const a = i / 12 * TAU, sp = new THREE.Mesh(new THREE.ConeGeometry(0.06, i % 2 ? 0.22 : 0.4, 4), rim); sp.position.set(Math.cos(a) * 1.2, Math.sin(a) * 1.2, 0); sp.rotation.z = a - Math.PI / 2; g.add(sp); }
+    g.visible = false; scene3.add(g); mirrors.push({ g, faceM, ph: j * 1.7, y0: 0 });
+  }
+}
+/** Tầng Máu and Tầng Thần: high on the wall between the piers. On the bridge: floating round it in the fire's smoke. */
+function placeMirrors(fl) {
+  mirrorFresh = 2; // both views drawn at once, before the first frame shows them
+  mirrors.forEach((m, j) => {
+    const top = fl === 3, a = (top ? j + 0.5 : j) / 6 * TAU, r = top ? 15 : FENCE_R + 0.05, y = top ? 5.6 : 4.6, sc = top ? 2.4 : 1.7;
+    m.y0 = y; m.g.position.set(Math.cos(a) * r, y, Math.sin(a) * r); m.g.scale.setScalar(sc); m.g.lookAt(0, y - (top ? 2.5 : 1.2), 0); m.g.visible = true;
+  });
+}
+function updateMirrors(F) {
+  const s = state, red = s.pulseT > 0;
+  for (const m of mirrors) {
+    if (F.tower === 3) m.g.position.y = m.y0 + Math.sin(vt * 0.8 + m.ph) * 0.25;
+    m.faceM.color.setHex(red ? 0xFF9090 : 0xE8D0FF);
+  }
+}
+/** Every other frame, one of two views of the arena's stands (nobody on the sand) into the mirrors. */
+function renderMirrors() {
+  if (!mirrors.length) return;
+  mirrorN++; const every = CHEAP ? 6 : 2; if (mirrorFresh <= 0 && mirrorN % every) return;
+  const which = mirrorFresh > 0 ? --mirrorFresh & 1 : (mirrorN / every) & 1, a = which ? Math.PI : 0;
+  const hide = [towerG.base, towerG.top, ...mirrors.map(m => m.g)], keep = hide.map(o => o.visible);
+  for (const o of arenaParts) o.visible = true; for (const o of hide) o.visible = false;
+  const fog = scene3.fog, bg = scene3.background, hi = hemi.intensity;
+  scene3.fog = null; scene3.background = MIRROR_BG; hemi.intensity = Math.max(hi, 2.2);
+  mirrorCam.position.set(0, 2.4, 0); mirrorCam.lookAt(Math.cos(a) * 20, 6.5, Math.sin(a) * 20);
+  renderer.setRenderTarget(mirrorRT[which]); renderer.render(scene3, mirrorCam); renderer.setRenderTarget(null);
+  scene3.fog = fog; scene3.background = bg; hemi.intensity = hi;
+  for (const o of arenaParts) o.visible = false; hide.forEach((o, i) => { o.visible = keep[i]; });
+}
+const orbGeo = new THREE.SphereGeometry(0.22, 10, 8), orbMat = new THREE.MeshBasicMaterial({ color: 0x5A2A9A });
+/** Valerian's dark orb: flies like an arrow (and is met like one). */
+function shadowOrb(x0, y0, z0, x1, y1, z1, dur) {
+  const m = new THREE.Mesh(orbGeo, orbMat); m.position.set(x0, y0, z0); scene3.add(m);
+  FX.arrows.push({ m, x0, y0, z0, x1, y1, z1, t: 0, dur });
+  burst(x0, y0, z0, 'shadow', 6, 2, 1.5);
+}
+function spawnGift(x, z) {
+  if (state.phase !== 'fight') return;
+  const g = new THREE.Group(); g.position.set(x, 0.05, z);
+  g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), mat(0x9A3A22)), 0, 0.3, 0));
+  g.add(at(cyl(0.07, 0.1, 0.22, 8, mat(0x9A3A22)), 0, 0.58, 0));
+  g.add(at(cyl(0.1, 0.1, 0.05, 8, PM.gold), 0, 0.68, 0));
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.55, 24), new THREE.MeshBasicMaterial({ color: PAL.gold, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.02; g.add(ring);
+  scene3.add(g); gifts.push({ x, z, g, t: 0 }); burst(x, 0.3, z, 'dust', 8, 2, 1.5);
+}
 const TRAIL_N = 14;
 function makeTrail(glow) {
   const g = new THREE.BufferGeometry();
@@ -2278,6 +3300,7 @@ function makeTrail(glow) {
 function trailColor(f, m) {
   if (m.god) return GODS[m.god].css;
   if (f.kind !== 'kael') return m.red ? PAL.danger : 0xE8E2D4;
+  if (state.lightT > 0) return 0xFFF0B0; // the Light Sword
   if (state.frenzy > 0) return PAL.gold;
   return m.heavy ? 0xFFE6B0 : 0xF4EEE0;
 }
@@ -2357,6 +3380,8 @@ function reset() {
     // the purse (what Kael keeps), Varro's take, this chapter's takings; the choices that shape the ending
     purse: 0, varroTotal: 0, chGross: 0, chVarro: 0, choices: {}, lyra: false, sabinaAlly: false, brennusDead: false, demandsMet: 0,
     fightParries: 0, coach: 'brennus', result: null, resultT: 0,
+    // the tower: idols broken (light in the father's hilt), the light filled on the bridge, the Light Sword's time left
+    blade: 0, light: 0, lightT: 0, bridge: null,
     // the gods' cooldowns, Nox's slow, the horde still to come through the gate, kills in a row
     cd: {}, noxT: 0, hordeLeft: 0, hordeMax: 0, hordeT: 0, lastKillT: -9, multi: 0, kills: 0, execs: 0, casts: 0 };
   state.kael = newKael();
@@ -2369,13 +3394,14 @@ function setupFight(i, first) {
   FX.nets.forEach(n => scene3.remove(n.m)); FX.nets.length = 0;
   FX.arrows.forEach(a => scene3.remove(a.m)); FX.arrows.length = 0; FX.fires.length = 0;
   s.fight = i; s.phase = 'intro'; s.phaseT = 0; s.fightTime = 0; s.frenzy = 0; s.booing = false; s.stoneT = 2; s.fightParries = 0;
-  applyArena(F.ch); setWater(!!F.water); setPillars(!!F.pillars);
+  applyArena(F.ch); setWater(!!F.water || (!!tune.arenas_on && F.ch === 3 && i + 1 >= tune.arena_from_fight)); setPillars(!!F.pillars); setArenaDress(i); setTraps(i);
   // who shouts advice from beyond the fence: Brennus, unless he is the foe or dead; then Sabina if she was spared, else Varro
-  s.coach = i === 44 || s.brennusDead ? (s.sabinaAlly ? 'sabina' : 'varro') : 'brennus';
+  s.coach = i === 23 || s.brennusDead ? (s.sabinaAlly ? 'sabina' : 'varro') : 'brennus';
   if (brennus) FIG.get(brennus).root.visible = s.coach === 'brennus';
   if (extras.sabina) FIG.get(extras.sabina).root.visible = s.coach === 'sabina';
   if (extras.lyra) FIG.get(extras.lyra).root.visible = false;
   if (F.ch >= 2 && extras.emperor) FIG.get(extras.emperor).root.visible = true;
+  setTower(i);
   k.maxHp = tune.kael_hp + tune.kael_hp_per_ch * (F.ch - 1);
   if (first) { s.fameAtStart = s.fame; s.divineAtStart = s.divine; } else { s.fame = s.fameAtStart; s.divine = s.divineAtStart; }
   const kf = FIG.get(k);
@@ -2385,14 +3411,16 @@ function setupFight(i, first) {
   k.px = k.x; k.pz = k.z; kf.root.visible = true; cam.yaw = Math.PI; cam.snap = true;
   // a fight with a scene first waits at the gate until the herald calls it in
   const script = first && tune.cutscenes > 0 && !cutSeen[i] && !(i === 0 && tutorialDone) ? cutFor(i) : null;
-  s.foes = F.foes.map((kind, j) => { // in through the gate, side by side when two
-    const e = newFighter(kind, F.vet, F.ch - 1), n = F.foes.length;
+  const kinds = F.tower === 1 ? shadeKinds() : F.foes;
+  s.foes = kinds.map((kind, j) => { // in through the gate, side by side when two
+    const e = newFighter(kind, F.vet, KIND[kind].idol ? 0 : F.ch - 1), n = kinds.length;
     Object.assign(e, { x: n > 1 ? (j - (n - 1) / 2) * 2.4 : 0, z: -FENCE_R - 1.2 - j * 1.4, yaw: 0, state: script ? 'gatewait' : 'enter' }); e.px = e.x; e.pz = e.z;
     return e;
   });
   s.enemy = s.foes[0];
-  const hn = i === 0 || F.boss || F.mercy ? 0 : F.horde !== undefined ? F.horde : Math.round(tune['horde_ch' + F.ch] * (F.demand === 'fast' ? 0.5 : 1));
-  Object.assign(s, { hordeLeft: hn, hordeMax: hn, hordeT: tune.horde_first, lastKillT: -9, multi: 0, noxT: 0, cd: {} });
+  if (F.tower) placeTowerFoes(F);
+  const hn = F.tower ? tune['tower' + F.tower + '_horde'] : i === 0 || F.boss || F.mercy ? 0 : F.horde !== undefined ? F.horde : Math.round(tune['horde_ch' + F.ch] * (F.demand === 'fast' ? 0.5 : 1));
+  Object.assign(s, { hordeLeft: hn, hordeMax: hn, hordeT: tune.horde_first, lastKillT: -9, multi: 0, noxT: 0, cd: {}, trapT: 0, lionOut: false });
   s.banner = null;
   s.sayQ = [];
   if (i === 0 && !tutorialDone) { tut.step = 0; tut.t = 0; tut.tries = 0; tut.said = -1; s.titleT = first ? 4.2 : 0; for (const key in s.said) if (key[0] === 't') delete s.said[key]; }
@@ -2403,18 +3431,18 @@ function setupFight(i, first) {
   if (first && i > 0) saveRun();
 }
 /** The run so far, on this device: the fight reached and what was carried into it. */
-const SAVE_KEY = 'foc.save';
+const SAVE_KEY = DEBUG ? 'foc.save.debug' : 'foc.save';
 const SAVED = ['fame', 'divine', 'choice', 'nghia', 'huyet', 'gained', 'deaths', 'parries', 'totalTime', 'ignars',
-  'purse', 'varroTotal', 'chGross', 'chVarro', 'choices', 'lyra', 'sabinaAlly', 'brennusDead', 'demandsMet', 'maxCombo', 'learned'];
+  'purse', 'varroTotal', 'chGross', 'chVarro', 'choices', 'lyra', 'sabinaAlly', 'brennusDead', 'demandsMet', 'maxCombo', 'learned', 'blade'];
 function saveRun(at = state.fight) {
-  const s = state, d = { fight: at, cutSeen };
+  const s = state, d = { fight: at, cutSeen, ladder: FIGHTS.length };
   for (const k of SAVED) d[k] = s[k];
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(d)); } catch (e) { /* not saved: fine */ }
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* nothing to clear */ } }
 function loadRun() {
   let d = null; try { d = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { d = null; }
-  if (!d || !(d.fight >= 1 && d.fight < FIGHTS.length)) return false;
+  if (!d || d.ladder !== FIGHTS.length || !(d.fight >= 1 && d.fight < FIGHTS.length)) return false;
   const s = state;
   for (const k of SAVED) if (d[k] !== undefined) s[k] = d[k];
   if (!d.learned) s.learned = learnedBefore(d.fight); // a save from before gods were won from bosses
@@ -2436,7 +3464,7 @@ function fightBegins(i) {
   if (i === 0 && tutorialDone) say('intro1b', 'Lại là thằng tân binh. Hạ nó cho gọn, nhóc!', 3, 1);
   const nu = GOD_ORDER.find(g => GODS[g].unlock() === i + 1);
   if (nu) { const G = GODS[nu]; say('holds' + nu, `${G.from} mang phép ${G.name}, thần ${G.what.toLowerCase()}! ${G.bossTell} Hạ hắn thì phép là của mày.`, 6, 3); events.push({ type: 'bossgod', god: nu }); }
-  if (i === FIGHTS.length - 1) say('allgods', 'Kẻ Bất Bại dùng cả năm phép thần! Nhìn vòng đỏ, khói tím, lửa: LĂN cho đúng lúc!', 6, 3);
+  if (FIGHTS[i].foes[0] === 'golden') say('allgods', 'Kẻ Bất Bại dùng cả năm phép thần! Nhìn vòng đỏ, khói tím, lửa: LĂN cho đúng lúc!', 6, 3);
   if (F.demand) say('demand' + i, `Đám đông đòi: ${DEMANDS[F.demand].text()}! Làm được thì túi tiền nặng thêm.`, 4, 2);
   else if (!F.intro && F.ch > 1) { const tip = F.foes.map(k => KIND[k].tip).find(t => t && !s.said['tip' + t.length]); if (tip) say('tip' + tip.length, tip, 4.5, 1); }
 }
@@ -2455,6 +3483,7 @@ const SPEAK = {
   kael: { name: 'KAEL', color: '#8E3B2E', pitch: 140 },
   brennus: { name: 'BRENNUS MỘT MẮT', color: '#5A4632', pitch: 98 },
   emperor: { name: 'HOÀNG ĐẾ VALERIAN', color: '#5A1E4A', pitch: 125, hall: true },
+  sorcerer: { name: 'VALERIAN · PHÁP SƯ', color: '#2A0E3A', pitch: 88, hall: true },
   foe: { color: '#4A4038', pitch: 120 }, foe2: { color: '#4A4038', pitch: 108 },
 };
 function actor(who) {
@@ -2463,6 +3492,7 @@ function actor(who) {
   if (who === 'brennus') return brennus;
   if (who === 'foe') return s.foes[0];
   if (who === 'foe2') return s.foes[1] || s.foes[0];
+  if (who === 'sorcerer') return s.foes.find(f => f.kind === 'sorcerer') || extras.emperor;
   if (extras[who] && FIG.get(extras[who]).root.visible) return extras[who];
   return s.foes.find(f => f.kind === who) || extras[who];
 }
@@ -2477,7 +3507,7 @@ const headY = f => {
 const BC = (who, text, a, d, onA, onD) => ({ who, text, shot: 'face', choice: { a, d, onA, onD, done: false } });
 /** Lines to play next, after the current beat (a choice's answer). */
 const cutAdd = beats => { if (cut) cut.beats.splice(cut.i + 1, 0, ...beats); };
-const showLyra = () => { const l = extras.lyra; Object.assign(l, { x: 1.6, z: -6.4, px: 1.6, pz: -6.4, yaw: Math.PI, state: 'idle' }); FIG.get(l).root.visible = true; sfx('cheer', 0.6); };
+const showLyra = () => { const l = extras.lyra; Object.assign(l, { x: 1.6, y: 0, z: -6.4, px: 1.6, pz: -6.4, yaw: Math.PI, state: 'idle' }); FIG.get(l).root.visible = true; sfx('cheer', 0.6); };
 const B = (who, text, shot, act) => ({ who, text, shot: shot || 'face', act });
 const openGate = () => { if (cut) cut.drumOn = true; for (const f of state.foes) if (f.state === 'gatewait') { f.state = 'enter'; f.t = 0; } sfx('cheer', 0.9); timp(55, 0.6); };
 const showEmperor = () => { FIG.get(extras.emperor).root.visible = true; sfx('cheer', 1.1); crowd.excite = 1; };
@@ -2487,7 +3517,7 @@ const CUTS = {
     B('herald', 'Công dân Aurelia! Hôm nay trường đấu của Gaius Varro dâng lên một con thú mới, bắt từ phương Bắc!', 'wide'),
     B('varro', 'Nó tên Kael. Con trai một thợ rèn, bị bắt ở biên giới. Ta trả giá đắt đấy, nên nó phải đánh cho ra trò.'),
     B('kael', 'Em gái tôi, Lyra... Chúng đã đem con bé đi đâu?'),
-    B('varro', 'Ai mà biết. Thắng năm mươi trận, mày được tự do. Rồi tha hồ mà đi tìm.'),
+    B('varro', 'Ai mà biết. Thắng ba mươi trận, mày được tự do. Rồi tha hồ mà đi tìm.'),
     B('brennus', 'Đừng nghe lão béo, nhóc. Ở đây đám đông muốn máu và màn trình diễn. Cho họ cả hai, mày sẽ sống.'),
     B('kael', 'Vậy tôi sẽ sống. Vì Lyra.'),
     B('herald', 'Trận thứ nhất! Kael phương Bắc... đấu với một tân binh!', 'gate', openGate),
@@ -2504,9 +3534,9 @@ const CUTS = {
     B('kael', 'Vậy thì lưới của mày sắp rách rồi.'),
   ],
   3: () => [
-    B('herald', 'Trận thứ tư! Hai chọi một! Đám đông muốn xem nó chết thế nào!', 'gate', openGate),
-    B('foe', 'Chia đôi phần thưởng nhé?', 'over:kael:foe'),
-    B('foe2', 'Tao lấy cái đầu. Mày lấy phần còn lại.', 'over:kael:foe2'),
+    B('herald', 'Trận thứ tư! Nhanh như rắn hổ mang... Vex, Song Kiếm! Và nó không vào một mình!', 'gate', openGate),
+    B('foe', 'Nhanh lên nào, tao chán rồi đây.', 'over:kael:foe'),
+    B('foe2', 'Mày giữ nó, tao chém.', 'over:kael:foe2'),
     B('brennus', 'Đừng để chúng kẹp giữa, nhóc!'),
   ],
   4: () => [
@@ -2515,82 +3545,65 @@ const CUTS = {
     B('brennus', 'Nó từng giết bạn tao trên chính bãi cát này. Đừng để nó giết thêm ai nữa.'),
     B('kael', 'Hôm nay nó trả nợ.'),
   ],
-  5: () => [
-    B('herald', 'Trận thứ sáu! Nhanh như rắn hổ mang... Vex, Song Kiếm!', 'gate', openGate),
-    B('foe', 'Nhanh lên nào, tao chán rồi đây.', 'over:kael:foe'),
-    B('kael', 'Mày sẽ không phải chờ lâu.'),
-  ],
-  6: () => [
-    B('herald', 'Trận thứ bảy! Nereus trở lại... và lần này không đi một mình!', 'gate', openGate),
-    B('foe', 'Lần này tao mang theo bạn.', 'over:kael:foe'),
-    B('foe2', 'Mày giữ nó, tao chém.', 'over:kael:foe2'),
-  ],
-  7: () => [
-    B('herald', 'Trận thứ tám! Cassius đã thề báo thù!', 'gate', openGate),
-    B('foe', 'Mày làm tao mất mặt trước cả Hố Cát. Hôm nay mày trả bằng máu.', 'over:kael:foe'),
-    B('kael', 'Lần trước tao chỉ phá cái khiên. Lần này thì không.'),
-  ],
-  8: () => [
-    B('herald', 'Trận thứ chín! Lưới và song kiếm... cùng một lúc!', 'gate', openGate),
-    B('foe', 'Lưới giữ, kiếm cắt. Đơn giản.', 'over:kael:foe'),
-    B('foe2', 'Lần này mày không lăn kịp đâu.', 'over:kael:foe2'),
-    B('brennus', 'Cả đám đông cá mày gục ở trận này. Làm họ mất tiền đi, nhóc.'),
-  ],
-  9: () => [
-    B('herald', 'Công dân Aurelia! Hoàng đế Valerian đã đến!', 'box', showEmperor),
-    B('emperor', 'Ta nghe nói về gã phương Bắc này. Cho ta xem ngươi có xứng với lời đồn.'),
-    B('herald', 'Món quà của Hoàng đế... con sư tử da sắt của Nemea!', 'gate', openGate),
-    B('brennus', 'Không ai từng sống sót qua con thú đó, nhóc. Hãy là người đầu tiên.'),
-    B('kael', 'Lyra... chờ anh thêm một chút nữa.'),
-  ],
   afterGrull: () => { const tha = state.choice !== 'giet', share = Math.round((1 - tune.varro_cut) * 10); return [
     B('varro', 'Ha! Grull Đồ Tể nằm dưới chân con thú của ta! Hôm nay ta phát tài rồi!'),
     B('kael', 'Bao nhiêu trong số đó là của tôi?'),
     B('varro', `${['Không', 'Một', 'Hai', 'Ba', 'Bốn', 'Năm', 'Sáu', 'Bảy', 'Tám', 'Chín', 'Mười'][share]} phần mười, như đã hứa. Phần còn lại là tiền cơm, tiền thuốc... và tiền xích của mày.`),
     tha ? B('brennus', 'Mày tha cho nó. Đám đông sẽ nhớ điều đó, nhóc. Tao cũng vậy.')
         : B('brennus', 'Mày giết nó. Đúng luật của cái hố này... nhưng đừng để nó thành thói quen, nhóc.'),
+    B('kael', 'Quanh đấu trường có năm tượng thần... sao lại có sáu cái bệ?'),
+    B('brennus', 'Cái bệ trống là của Sol, thần mặt trời. Ngày Hoàng đế lên ngôi, tượng Sol bị đập khắp Aurelia. Đừng hỏi ai câu đó nữa, nhóc. Kẻ hỏi thường mất lưỡi.'),
     B('brennus', 'Còn nữa: người ta đồn Hoàng đế sắp đến xem. Có kẻ đã kể với ngài về mày.'),
   ]; },
+  5: () => [
+    B('herald', 'Công dân Aurelia! Hoàng đế Valerian đã đến, sau tấm màn che nắng!', 'box', showEmperor),
+    B('emperor', 'Ta nghe nói về gã phương Bắc này. Cho ta xem ngươi có xứng với lời đồn.'),
+    B('herald', 'Món quà của Hoàng đế... con sư tử da sắt của Nemea!', 'gate', openGate),
+    B('brennus', 'Không ai từng sống sót qua con thú đó, nhóc. Hãy là người đầu tiên.'),
+    B('kael', 'Lyra... chờ anh thêm một chút nữa.'),
+  ],
   end1: () => [
     B('emperor', 'Kael phương Bắc. Ngươi làm ta vui. Hãy đến Kinh Đô.', 'face', () => { FIG.get(extras.emperor).root.visible = true; }),
-    B('herald', 'Theo ý Hoàng đế: Kael được ghi tên vào Đại Đấu Trường Colossus!', 'box'),
+    B('herald', 'Theo ý Hoàng đế: Kael được ghi tên vào Đại Đấu Trường của Aurelia!', 'box'),
     B('varro', 'Kinh Đô! Ta biết mà, ta biết ngay từ ngày mua nó!'),
-    B('brennus', 'Nghe tao, nhóc. Ở Kinh Đô có một kẻ chưa từng thua. Người ta gọi hắn là Kẻ Bất Bại, kẻ đeo mặt nạ vàng.'),
+    B('brennus', 'Mày để ý không, nhóc? Suốt trận ngài ngồi sau màn che. Không một tia nắng nào chạm vào ngài.'),
+    B('brennus', 'Còn điều này nữa. Ở Kinh Đô có một kẻ chưa từng thua. Người ta gọi hắn là Kẻ Bất Bại, kẻ đeo mặt nạ vàng.'),
     B('brennus', 'Và người ta đồn... hắn giữ một nữ nô phương Bắc. Tên là Lyra.'),
     B('kael', 'Lyra... Em đợi anh.'),
   ],
   // ---- Chương 2: Kinh Đô
-  10: () => [
+  6: () => [
     B('herald', 'Công dân Kinh Đô! Đại Đấu Trường của Aurelia chào đón con thú phương Bắc của Hố Cát!', 'wide'),
-    B('varro', 'Nhìn kìa, nhóc: năm vạn người. Ở đây mỗi trận trả gấp đôi Hố Cát. Phần của ta cũng vậy.'),
-    B('brennus', 'Đấu sĩ ở Kinh Đô không phải bọn liều mạng. Chúng là lính đánh thuê, thợ săn, kẻ giết người có nghề.'),
-    B('kael', 'Tôi cũng có nghề. Cha tôi dạy tôi cầm búa trước khi cầm kiếm.'),
-    B('herald', `Trận thứ mười một! ${cap(KIND.axe.herald)}!`, 'gate', openGate),
+    B('varro', 'Nhìn kìa, nhóc: năm vạn người. Ở đây mỗi trận trả gấp mấy lần Hố Cát. Phần của ta cũng vậy.'),
+    B('brennus', 'Ở Kinh Đô người ta đấu dưới đuốc. Hoàng đế chỉ xem đấu khi mặt trời đã lặn.'),
+    B('kael', 'Đấu ban đêm thì càng tốt. Cha tôi dạy tôi cầm búa bên lò rèn, trước khi trời sáng.'),
+    B('herald', `Trận thứ bảy! ${cap(KIND.axe.herald)}!`, 'gate', openGate),
     B('foe', KIND.axe.taunts[0], 'over:kael:foe'),
   ],
-  14: () => [
-    B('herald', 'Mũi tên của nàng chưa bao giờ trượt! Thợ săn của rừng Thessaly... SABINA, CUNG THẦN!', 'gate', openGate),
-    B('foe', 'Ta đã săn sói, săn gấu, săn người. Ngươi chạy cũng vô ích.', 'over:kael:foe'),
-    B('kael', 'Tôi không chạy.'),
-    B('brennus', 'Cung thủ thì sợ bị áp sát. Lao vào nó, nhóc, và gạt tên bằng khiên!'),
-  ],
-  afterSabina: () => { const tha = state.choices[14] !== 'giet'; return tha ? [
-    B('foe', 'Ngươi tha cho ta... Không ai từng tha cho ta cả.'),
-    B('kael', 'Tôi không giết người chỉ để mua vui cho đám đông.'),
-    B('foe', 'Vậy ta nợ ngươi một mạng. Khi nào ngươi cần một mũi tên, Sabina sẽ ở đó.'),
-    B('brennus', 'Một cung thủ giỏi là một đồng minh quý, nhóc. Giữ lấy.'),
-  ] : [
-    B('varro', 'Ha! Cung Thần của Kinh Đô nằm xuống! Ngày mai cả thành phố sẽ cá vào mày!'),
-    B('brennus', 'Mày giết một người có thể thành bạn mày. Ở Kinh Đô, bạn còn hiếm hơn vàng.'),
-  ]; },
-  19: () => [
+  8: () => [
     B('herald', 'Hai anh em sinh đôi! Chưa từng thua khi đánh cùng nhau... CASTOR VÀ POLLUX!', 'gate', openGate),
     B('foe', 'Em tao lo cái đầu, tao lo cái khiên của mày.', 'over:kael:foe'),
     B('foe2', 'Và khi một đứa ngã... đứa kia sẽ không biết thương xót là gì.', 'over:kael:foe2'),
     B('brennus', 'Hạ đứa nào trước thì đứa kia điên lên. Giữ sức cho đứa thứ hai!'),
   ],
-  24: () => [
-    B('herald', 'Công dân Kinh Đô! Hôm nay cát được rải cho xe ngựa! Nhà vô địch đua xe ba năm liền... CRIXUS!', 'gate', openGate),
+  9: () => [
+    B('herald', 'Mũi tên của nàng chưa bao giờ trượt! Thợ săn của rừng Thessaly... SABINA, CUNG THẦN!', 'gate', openGate),
+    B('foe', 'Ta đã săn sói, săn gấu, săn người. Ngươi chạy cũng vô ích.', 'over:kael:foe'),
+    B('kael', 'Tôi không chạy.'),
+    B('brennus', 'Cung thủ thì sợ bị áp sát. Lao vào nó, nhóc, và gạt tên bằng khiên!'),
+  ],
+  afterSabina: () => { const tha = state.choices[9] !== 'giet'; return tha ? [
+    B('foe', 'Ngươi tha cho ta... Không ai từng tha cho ta cả.'),
+    B('kael', 'Tôi không giết người chỉ để mua vui cho đám đông.'),
+    B('foe', 'Vậy ta nợ ngươi một mạng. Khi nào ngươi cần một mũi tên, Sabina sẽ ở đó.'),
+    B('foe', 'Một điều nữa. Ta săn trong rừng của Hoàng đế mười năm. Ngài chưa từng bước ra ngoài khi trời sáng. Chưa một lần.'),
+    B('brennus', 'Một cung thủ giỏi là một đồng minh quý, nhóc. Giữ lấy.'),
+  ] : [
+    B('varro', 'Ha! Cung Thần của Kinh Đô nằm xuống! Ngày mai cả thành phố sẽ cá vào mày!'),
+    B('brennus', 'Mày giết một người có thể thành bạn mày. Ở Kinh Đô, bạn còn hiếm hơn vàng.'),
+  ]; },
+  11: () => [
+    B('herald', 'Công dân Kinh Đô! Đêm nay cát được rải cho xe ngựa! Nhà vô địch đua xe ba năm liền... CRIXUS!', 'gate', openGate),
     B('emperor', 'Ta muốn xem gã phương Bắc làm gì trước bốn con ngựa.'),
     B('brennus', 'Kiếm không làm gì được cái xe. Nhưng xe thì không rẽ kịp trước cột đá. Dùng đầu đi, nhóc!'),
     B('kael', 'Vậy thì để cột đá làm thay tôi.'),
@@ -2604,24 +3617,39 @@ const CUTS = {
     B('kael', 'Lyra có mái tóc đỏ của mẹ... Anh đến đây, em gái.'),
   ],
   // ---- Chương 3: Colossus
-  25: () => [
-    B('herald', 'Công dân Aurelia! Trong Colossus, thần linh nhìn xuống từ những bức tượng vàng! Hôm nay họ nhìn Kael!', 'wide'),
-    B('emperor', 'Hai mươi trận ở đây, rồi ngươi sẽ đứng trước Kẻ Bất Bại. Nếu còn sống.'),
+  12: () => [
+    B('herald', 'Công dân Aurelia! Trong Colossus, thần linh nhìn xuống từ những bức tượng! Hôm nay họ nhìn Kael!', 'wide'),
+    B('emperor', 'Sáu trận ở đây, rồi ngươi sẽ được vào vườn của ta. Nếu còn sống.'),
     B('brennus', 'Vệ binh Hoàng gia cũng xuống cát ở đây. Chúng được dạy để giết, không phải để làm trò.'),
-    B('herald', `Trận thứ hai mươi sáu! ${cap(KIND.guard.herald)}!`, 'gate', openGate),
+    B('herald', `Trận thứ mười ba! ${cap(KIND.guard.herald)}!`, 'gate', openGate),
     B('foe', KIND.guard.taunts[0], 'over:kael:foe'),
   ],
-  29: () => [
+  17: () => [
     B('herald', 'Nước biển tràn vào Colossus! Đô đốc của hạm đội Hoàng gia... MARINUS!', 'gate', openGate),
     B('foe', 'Ta đã nhấn chìm cả một hạm đội. Một tên nô lệ thì có là gì.', 'over:kael:foe'),
     B('brennus', 'Nước làm chân mày nặng. Đừng để nó dồn mày vào tường!'),
   ],
-  34: () => [
+  end3: () => [
+    B('emperor', 'Biển cũng không nuốt nổi ngươi. Từ nay ngươi đấu trong vườn của ta, nơi ta xem cho gần.', 'face', () => { FIG.get(extras.emperor).root.visible = true; }),
+    B('herald', 'Theo ý Hoàng đế: Kael phương Bắc được bước vào VƯỜN HOÀNG ĐẾ!', 'box'),
+    B('kael', 'Lúc nước rút, dưới sàn Colossus có một bức khảm mặt trời. Ai đó đã đục nát nó.'),
+    B('brennus', 'Mặt trời của Sol. Ngày xưa đấu sĩ cầu ngài trước mỗi trận. Giờ người ta đục mặt ngài khỏi đá, và không ai dám hỏi vì sao.'),
+    B('varro', `Mày đang giữ ${state.purse} denarii. Tự do giá ${tune.freedom_price}.`),
+  ],
+  // ---- Chương 4: Vườn Hoàng Đế
+  18: () => [
+    B('herald', 'Công dân Aurelia! Chiều nay Hoàng đế mở cửa khu vườn riêng của ngài cho đấu sĩ phương Bắc!', 'wide'),
+    B('kael', 'Năm vị thần đứng quanh vườn. Lại một cái bệ trống.'),
+    B('brennus', 'Nhìn kỹ đi, nhóc: dưới nắng chiều, bóng của Hoàng đế không cử động theo ngài.'),
+    B('herald', `Trận thứ mười chín! ${cap(KIND.axe.herald)} và ${KIND.archer.herald || KIND.archer.name}!`, 'gate', openGate),
+    B('foe', KIND.axe.taunts[1 % KIND.axe.taunts.length], 'over:kael:foe'),
+  ],
+  19: () => [
     B('herald', 'Từ bên kia sa mạc, vượt qua cả dãy núi... Hanno và CON VOI CHIẾN!', 'gate', openGate),
     B('varro', 'Một con voi! Thần linh ơi, nếu mày chết hôm nay thì ta lỗ to!'),
     B('brennus', 'Nó to, nhưng nó chậm quay đầu. Đứng sau lưng nó, nhóc!'),
   ],
-  39: () => [
+  21: () => [
     B('herald', 'Chỉ huy vệ binh Hoàng gia, cánh tay phải của Hoàng đế... PRAETOR SEVERUS!', 'gate', openGate),
     B('foe', 'Ta sẽ cho ngươi thấy đấu trường không phải chỗ cho nô lệ mơ mộng.', 'over:kael:foe'),
     B('emperor', 'Severus. Đừng làm ta thất vọng.'),
@@ -2641,14 +3669,14 @@ const CUTS = {
       cutAdd([B('kael', 'Tôi không mua tin bằng tiền đổi máu. Tôi sẽ tự tìm em ấy.'), B('varro', 'Đồ kiêu hãnh ngu ngốc.')]);
     }),
   ]; },
-  44: () => [
+  23: () => [
     B('herald', 'Công dân Aurelia! Theo ý Hoàng đế: thầy đấu với trò! BRENNUS MỘT MẮT!', 'gate', openGate),
     B('emperor', 'Ta muốn biết ngươi học được gì từ lão già đó. Hoặc lão dạy ngươi bao nhiêu.'),
     B('foe', 'Họ hứa trả tự do cho tao nếu tao giết mày, nhóc.', 'over:kael:foe'),
     B('kael', 'Thầy...'),
     B('foe', 'Đừng nương tay. Tao đã dạy mày tất cả, trừ cách thua.', 'over:kael:foe'),
   ],
-  afterBrennus: () => { const s = state, tha = s.choices[44] !== 'giet'; if (tha) s.lyra = true; else if (s.sabinaAlly) s.lyra = true; return tha ? [
+  afterBrennus: () => { const s = state, tha = s.choices[23] !== 'giet'; if (tha) s.lyra = true; else if (s.sabinaAlly) s.lyra = true; return tha ? [
     B('foe', 'Mày tha cho tao... Hoàng đế sẽ không thích điều này, nhóc.'),
     B('kael', 'Hoàng đế không dạy tôi cầm kiếm. Thầy dạy.'),
     B('foe', 'Vậy nghe tao lần cuối: Lyra ở trong cung, trong phòng của Kẻ Bất Bại. Và cổ tay hắn có dấu búa thợ rèn... giống hệt của mày.'),
@@ -2659,20 +3687,21 @@ const CUTS = {
     s.sabinaAlly ? B('sabina', 'Trước khi đi, lão nhờ ta nhắn: Lyra ở trong phòng của Kẻ Bất Bại. Và tên đó có dấu búa thợ rèn trên cổ tay.')
       : B('varro', 'Lão để lại một câu: "Dấu búa trên cổ tay." Ta chẳng hiểu gì cả.'),
   ]; },
-  end3: () => [
-    B('emperor', 'Ngươi đã đi xa hơn bất kỳ ai. Chỉ còn một người đứng giữa ngươi và tự do.', 'face', () => { FIG.get(extras.emperor).root.visible = true; }),
-    B('herald', 'Trận Cuối! Năm trận nữa... rồi KẺ BẤT BẠI!', 'box'),
+  end4: () => [
+    B('emperor', 'Ngày mai mặt trời sẽ tắt trên Aurelia. Trăm năm mới có một lần. Ngươi sẽ đấu dưới bóng tối của ta.', 'face', () => { FIG.get(extras.emperor).root.visible = true; }),
+    B('herald', 'Nhật Thực! Sáu trận cuối... rồi KẺ BẤT BẠI!', 'box'),
     B('varro', `Mày đang giữ ${state.purse} denarii. Tự do giá ${tune.freedom_price}. ` + (state.purse >= tune.freedom_price ? 'Ta ghét phải nói, nhưng mày đủ tiền rồi.' : 'Mày cần thắng thật đẹp.')),
-    B('kael', state.lyra ? 'Lyra, chờ anh. Chỉ năm trận nữa thôi.' : 'Lyra... em ở đâu?'),
+    B('kael', state.lyra ? 'Lyra, chờ anh. Chỉ sáu trận nữa thôi.' : 'Lyra... em ở đâu?'),
   ],
-  // ---- Chương 4: Trận Cuối
-  45: () => [
-    B('herald', 'Công dân Aurelia! Năm trận cuối cùng! Ai sống sót sẽ đối mặt Kẻ Bất Bại!', 'wide'),
-    B(state.coach, state.coach === 'brennus' ? 'Năm trận cuối, nhóc. Đừng chết ở bậc thềm.' : 'Năm trận nữa. Chúng ta sẽ ra khỏi đây.'),
-    B('herald', `Trận thứ bốn mươi sáu! Hai ${KIND.guard.herald.replace('một ', '')} lão luyện!`, 'gate', openGate),
+  // ---- Chương 5: Nhật Thực
+  24: () => [
+    B('herald', 'Công dân Aurelia! Mặt trời đang tắt! Sáu trận cuối cùng! Ai sống sót sẽ đối mặt Kẻ Bất Bại!', 'wide'),
+    B(state.coach, state.coach === 'brennus' ? 'Sáu trận cuối, nhóc. Đừng chết ở bậc thềm.' : 'Sáu trận nữa. Chúng ta sẽ ra khỏi đây.'),
+    B('kael', 'Trời tối dần, mà Hoàng đế lại ngồi ra mép lô. Lần đầu tiên ngài không cần màn che.'),
+    B('herald', `Trận thứ hai mươi lăm! Hai ${KIND.guard.herald.replace('một ', '')} lão luyện!`, 'gate', openGate),
     B('foe', KIND.guard.taunts[1], 'over:kael:foe'),
   ],
-  49: () => [
+  29: () => [
     B('herald', 'Công dân Aurelia! Chưa từng thua một trận nào! Kẻ đeo mặt nạ vàng... KẺ BẤT BẠI!', 'gate', openGate),
     B('emperor', 'Đây là món đồ chơi đẹp nhất của ta, Kael. Hãy cho ta xem ai đẹp hơn.'),
     B('foe', '...', 'over:kael:foe'),
@@ -2681,31 +3710,89 @@ const CUTS = {
   ],
   mask: () => [
     B('foe', 'Ngươi đánh như... không. Không thể nào.', 'over:kael:foe'),
-    B('emperor', 'Kẻ Bất Bại! Đừng để ta phải chờ!'),
-    B('foe', 'Thần lửa ơi, cho ta sức thêm một lần nữa.', 'over:kael:foe'),
+    B('kael', 'Hắn đã có thể giết mình từ nãy. Sao hắn lại nương tay?'),
+    B('emperor', 'Kẻ Bất Bại! Nhớ giao kèo của ngươi!'),
+    B('foe', 'Sol ơi, tha thứ cho con.', 'over:kael:foe'),
   ],
-  reveal: () => { const tha = state.choices[49] !== 'giet'; return tha ? [
+  reveal: () => { const s = state, tha = s.choices[29] !== 'giet';
+    const hilt = () => { s.hilt = true; const k = s.kael; burst(k.x, 1.3, k.z, 'gold', 16, 2, 2); flash(k.x, 1.4, k.z, 2.4, 0xFFE7A0, false, 0.4); sfx('divineReady'); popup('CHUÔI KIẾM CỦA CHA', k.x, k.z, '#FFE7A0', 26); };
+    const dies = () => { const f = s.foes[0]; if (f) { f.state = 'dead'; f.t = 0; burst(f.x, 1, f.z, 'shadow', 26, 3, 2.5); flash(f.x, 1.2, f.z, 3, 0x6A5AB8, false, 0.35); } sfx('shadow'); sfx('thud'); shake = 0.4; };
+    return tha ? [
     B('foe', 'Cái cách ngươi giữ khiên... ta đã dạy nó cho một thằng bé, ở một lò rèn phương Bắc.', 'over:kael:foe'),
     B('kael', 'Dấu búa trên cổ tay... Cha?'),
-    B('foe', 'Họ bắt ta trước khi bắt hai đứa. Ta đeo mặt nạ này mười năm để được giữ Lyra bên cạnh.', 'over:kael:foe'),
-    B('emperor', 'Thật cảm động. Bây giờ, Kael: đấu trường là của ngươi. Ngươi muốn gì?'),
+    B('foe', 'Họ bắt ta trước khi bắt hai đứa. Ta giao kèo với hắn: ta đeo mặt nạ, thắng mọi trận cho hắn, đổi lại Lyra được sống.', 'over:kael:foe'),
+    B('foe', 'Giao kèo còn một điều: ngày Kẻ Bất Bại thua, mạng nó thuộc về hắn. Hôm nay ta thua rồi, con. Ta phải trả.', 'over:kael:foe'),
+    Object.assign(B('foe', 'Cầm lấy. Chuôi kiếm ta rèn cho con năm con lên mười. Lưỡi đã gãy, nhưng ánh sáng của Sol vẫn ngủ trong đó.', 'over:kael:foe', hilt), { keep: true }),
+    B('kael', 'Cha, đừng! Con tha cho cha mà!'),
+    B('emperor', 'Giao kèo là giao kèo, thợ rèn.', 'face', dies),
+    B('kael', 'CHA!'),
   ] : [
     B('kael', 'Chiếc mặt nạ...'),
     B('kael', 'Dấu búa trên cổ tay... Không. Cha?'),
-    B('emperor', 'Ồ, ngươi không biết sao? Thật là một vở kịch đẹp. Bây giờ, Kael: đấu trường là của ngươi.'),
+    B('foe', 'Đừng khóc, con. Ta giao kèo với hắn: ta thắng mọi trận cho hắn, Lyra được sống. Ngày ta thua, mạng ta là của hắn. Con chỉ làm nhanh hơn thôi.', 'over:kael:foe'),
+    Object.assign(B('foe', 'Cầm lấy chuôi kiếm này... ta rèn nó cho con. Ánh sáng của Sol... vẫn ngủ trong đó...', 'over:kael:foe', hilt), { keep: true }),
+    B('emperor', 'Ồ, ngươi không biết sao? Hắn bán mạng cho ta mười năm để con bé được sống. Giao kèo xong rồi.'),
   ]; },
-  end4: () => { const s = state, kind = endingKind(); return kind === 'tudo' ? [
-    B('kael', `Đây là ${tune.freedom_price} denarii. Giá của tự do, như ông đã hứa, Varro.`),
-    B('varro', 'Năm mươi trận... Ta chưa từng nghĩ có ngày phải giữ lời hứa đó.'),
-    B('lyra', 'Anh Kael!', 'face', showLyra),
-    B('kael', 'Lyra. Về nhà thôi.'),
+  // the emperor's true face: a sorcerer of darkness, who killed Sol; the arena rises into his tower
+  end5: () => { const s = state;
+    const em = () => { const e = extras.emperor; FIG.get(e).root.visible = true; e.dark = true; burst(e.x, e.y + 1.4, e.z, 'shadow', 40, 3.5, 3); flash(e.x, e.y + 1.5, e.z, 4, 0x6A5AB8, false, 0.5); sfx('shadow'); sfx('roar'); shake = 0.6; crowd.excite = 1.2; sfx('boo', 1); };
+    const rise = () => { shake = 1; sfx('quake'); flash(0, 2, 0, 9, 0x6A5AB8, false, 0.6); for (let j = 0; j < 24; j++) { const a = j / 24 * TAU; burst(Math.sin(a) * 8, 0.2, Math.cos(a) * 8, j % 2 ? 'shadow' : 'stone', 3, 3, 3); } };
+    const coach = s.coach === 'brennus' ? B('brennus', 'Sáu bệ tượng, chỉ năm vị thần... Sol chưa chết hẳn, nhóc. Ánh sáng nằm trong chuôi kiếm của cha mày!')
+      : s.coach === 'sabina' ? B('sabina', 'Mũi tên không bắn thủng bóng tối. Nhưng chuôi kiếm đó thì có thể. Leo lên đi, Kael!')
+      : B('varro', 'Đấu trường của ta... Đi đi, nhóc! Giết cái thứ đó, rồi ta tính tiền sau!');
+    return [
+    B('emperor', 'Còn bây giờ, phần của ta. Con bé.', 'face', em),
+    B('herald', 'Hoàng đế... cái bóng của ngài... Sol ơi, ngài không phải người!', 'box'),
+    B('sorcerer', 'Trăm năm nay ta là bóng tối của Aurelia. Ta giết thần mặt trời của các ngươi, đục tên hắn khỏi mọi bức tường. Đấu trường này là lò sưởi của ta, máu các ngươi là củi.', 'face'),
+    B('sorcerer', 'Muốn cứu em gái thì leo lên mà lấy. Ba tầng. Nếu ngươi còn sống tới đỉnh.', 'wide', rise),
+    coach,
+    B('kael', 'Lyra, chờ anh. Cha, nhìn con leo.'),
+  ]; },
+  // ---- Chương 6: Tháp Sinh Tử
+  30: () => { const ks = shadeKinds().slice(SHADE_BASE.length), nm = { grull: 'Grull', sabina: 'Sabina', mentor: 'thầy Brennus', golden: 'cha' };
+    return [
+    B('sorcerer', 'Nhìn lên tường đi. Đám đông dưới kia vẫn đang xem: ta mở cho chúng sáu tấm gương. Chúng sẽ thấy từng giọt máu của ngươi.', 'wide'),
+    B('sorcerer', 'Tầng thứ nhất: Tầng Máu. Những kẻ ngươi bỏ lại trên cát. Bóng của chúng vẫn ở đây với ta.', 'wide'),
+    ks.length ? B('kael', `${cap(ks.map(k => nm[k]).join(', '))}... Những người mình đã giết.`, 'wide') : B('kael', 'Chỉ có bóng của những kẻ lạ. Những người mình đã tha... không ai ở đây.', 'wide'),
+    B('kael', ks.length ? 'Tôi xin lỗi. Nhưng tôi không dừng lại ở đây.' : 'Lòng thương xót không để lại bóng ma. Tốt.'),
+  ]; },
+  31: () => [
+    B('sorcerer', 'Tầng thứ hai: Tầng Thần. Năm vị thần của các ngươi, ta bẻ gãy từ lâu rồi. Giờ chúng phục vụ ta.', 'wide'),
+    B('kael', 'Năm tượng thần bị bóng tối cắn nát... Kiếm không làm gì được chúng.', 'wide'),
+    B('kael', 'Nhưng phép của các ngài thì có. Terrak, Fulmen, Ignar, Thalassa, Nox: mỗi vị phá tượng của chính mình, rồi trả ánh sáng cho chuôi kiếm này.'),
+    B('sorcerer', 'Thần Lực của ngươi? Ta hút gần cạn rồi. Và phá một tượng thì những tượng còn lại nổi giận. Cứ thử đi.', 'wide'),
+  ],
+  32: () => [
+    B('sorcerer', 'Đỉnh tháp. Không còn tường. Đám đông nhìn qua gương của ta, chờ xem ngươi rơi xuống biển lửa.', 'over:kael:foe'),
+    B('lyra', 'Anh Kael! Hắn sợ ánh sáng! Phản đòn hắn, cho chuôi kiếm của cha sáng lên!', 'face'),
+    B('kael', 'Lyra! Chờ anh. Lần này anh không đến muộn.'),
+    B('sorcerer', 'Cầu sẽ vỡ dần dưới chân ngươi, con trai thợ rèn. Chạy đi đâu cũng là lửa.', 'over:kael:foe'),
+  ],
+  valPhase2: () => [
+    B('sorcerer', 'Ngươi làm ta chảy máu? Vậy thì cả tháp sẽ chảy máu cùng ta!', 'over:kael:foe'),
+    B('lyra', 'Anh ơi, cầu đang vỡ!', 'face'),
+  ],
+  finale: () => { const s = state;
+    const ash = () => { const f = s.foes.find(o => o.kind === 'sorcerer'); if (f) { burst(f.x, 1, f.z, 'shadow', 40, 3, 3); burst(f.x, 1.2, f.z, 'gold', 20, 3, 3); FIG.get(f).root.visible = false; } flash(0, 2, 0, 6, 0xFFF2D0, false, 0.5); sfx('shadow'); };
+    const free = () => { s.lyra = true; towerFall(); showLyra(); };
+    return [
+    B('sorcerer', 'Ánh sáng... của Sol... Không thể nào...', 'wide'),
+    B('kael', 'Đây là chuôi kiếm cha ta rèn, và cha ta đã trả mạng vì nó. Tan đi, cái bóng.', 'face', ash),
+    Object.assign(B('herald', 'Tháp sụp rồi! Mặt trời! Mặt trời trở lại trên Aurelia!', 'wide', free), { keep: true }),
+    B('lyra', 'Anh Kael!', 'face'),
+    B('kael', 'Lyra. Xong rồi. Cha... đã đưa chúng ta về đến đây.'),
+  ]; },
+  end6: () => { const s = state, kind = endingKind(); return kind === 'tudo' ? [
+    B('varro', `Ba mươi trận và một toà tháp... ${tune.freedom_price} denarii. Ta chưa từng nghĩ có ngày phải giữ lời hứa đó.`),
+    B('kael', 'Ông giữ đi, Varro. Tôi chỉ lấy tự do, và em gái tôi.'),
+    B('lyra', 'Về nhà thôi, anh. Về phương Bắc.', 'face'),
   ] : kind === 'khoinghia' ? [
-    B('kael', 'Ta không muốn đấu trường của ngươi. Ta muốn nó sụp đổ.', 'wide'),
-    s.sabinaAlly ? B('sabina', 'Mũi tên đầu tiên là của ta!') : B('herald', 'Lính gác! Lính gác! Bọn đấu sĩ phá xích rồi!', 'box'),
-    B('emperor', 'Bắt nó lại! BẮT NÓ LẠI!'),
+    B('kael', 'Hoàng đế của các người chỉ là một cái bóng, và cái bóng đã tan. Đập vỡ xích đi!', 'wide'),
+    s.sabinaAlly ? B('sabina', 'Mũi tên đầu tiên là của ta!') : B('herald', 'Đấu sĩ phá xích rồi! Không còn ai cản nổi nữa!', 'box'),
+    B('lyra', 'Anh Kael... mặt trời mọc lại rồi.', 'face'),
   ] : [
-    B('emperor', 'Đấu trường cần một Kẻ Bất Bại. Mặt nạ vàng là của ngươi, nếu ngươi muốn.', 'face', () => { maskOn(state.kael); }),
-    B('kael', 'Tôi muốn.', 'over:emperor:kael'),
+    B('herald', 'Hoàng đế đã chết! Người cuối cùng còn đứng trên đấu trường là ai?', 'box'),
+    B('kael', 'Là ta.', 'wide', () => { maskOn(state.kael); }),
     B('herald', 'Công dân Aurelia! Hãy cúi đầu trước VUA ĐẤU TRƯỜNG!', 'wide'),
   ]; },
 };
@@ -2739,6 +3826,7 @@ function nextBeat() {
 function endCut() {
   if (!cut) return;
   for (const b of cut.beats) if (b.choice && !b.choice.done) { b.choice.done = true; b.choice.onD(); } // skipped: the second answer
+  for (let j = Math.max(0, cut.i + 1); j < cut.beats.length; j++) { const b = cut.beats[j]; if (b.keep && b.act) b.act(); } // skipped: the beats the story needs still happen
   const fn = cut.onEnd; cut = null;
   for (const f of state.foes) if (f.state === 'gatewait') { f.state = 'enter'; f.t = 0; }
   for (const w in extras) extras[w].state = 'idle';
@@ -2861,7 +3949,7 @@ function drawCut() {
   text(isTouch ? 'Chạm để tiếp' : 'Space / chuột trái: tiếp', bx + bw - 50, by + bh - 22, 15, '#9A9080', 'right', FONT, 'normal');
 }
 function placeExtras() {
-  const s = (w, x, y, z, yaw, vis) => { const f = extras[w]; Object.assign(f, { x, y, z, px: x, pz: z, yaw, state: 'idle' }); FIG.get(f).root.visible = vis; };
+  const s = (w, x, y, z, yaw, vis) => { const f = extras[w]; Object.assign(f, { x, y, z, px: x, pz: z, yaw, state: 'idle', dark: false }); FIG.get(f).root.visible = vis; };
   s('herald', 12.0, 3.6, -1.7, -Math.PI / 2, true);  // on the imperial box, beside the throne
   s('emperor', 12.3, 3.6, 0.3, -Math.PI / 2, false); // only once he has come
   s('varro', varroSpot.x, STAND_Y, varroSpot.z, 0, true);
@@ -2872,12 +3960,12 @@ function placeExtras() {
 // ---- Brennus: shouts from beyond the fence ---------------------------------------------------
 const line = (pc, touch) => isTouch ? touch : pc;
 /** Queue a shout. key: once-per-fight id (or a cooldown key), prio: a higher one cuts in. */
-function say(key, textS, dur = 3.6, prio = 1, cooldown = 0) {
+function say(key, textS, dur = 3.6, prio = 1, cooldown = 0, who = null) {
   const s = state; if (!s) return;
   if (cooldown) { if (s.said[key] && s.t - s.said[key] < cooldown) return; }
   else if (s.said[key] !== undefined) return;
   s.said[key] = s.t;
-  const item = { text: textS, dur, prio, t: 0 };
+  const item = { text: textS, dur, prio, t: 0, who };
   if (!s.say || prio > s.say.prio || s.say.t > s.say.dur * 0.7) s.say = item; else if (s.sayQ.length < 2) s.sayQ.push(item);
   s.brennusT = 1.2;
 }
@@ -2925,7 +4013,7 @@ function updateFame(dt) {
     if (s.frenzy <= 0) { s.frenzy = 0; s.fame = tune.fame_after_frenzy; }
   }
   const wasBoo = s.booing;
-  s.booing = s.phase === 'fight' && s.fame < tune.fame_boo && s.frenzy <= 0;
+  s.booing = s.phase === 'fight' && s.fame < tune.fame_boo && s.frenzy <= 0 && !FIGHTS[s.fight].tower; // nobody watches in the tower
   if (s.booing && !wasBoo) { sfx('boo'); say('boo', 'Nghe chúng la ó không? Chúng muốn xem đánh nhau, không phải xem chạy trốn!', 4, 2, 20); events.push({ type: 'boo' }); }
   if (s.booing && alive(k)) {
     s.stoneT -= dt;
@@ -3034,6 +4122,7 @@ function fulmenStrike(k) {
   const s = state, near = s.foes.filter(alive).map(e => [e, Math.hypot(e.x - k.x, e.z - k.z)]).filter(p => p[1] <= tune.fulmen_range).sort((a, b) => a[1] - b[1]).slice(0, tune.fulmen_targets);
   sfx('thunder'); sfx('cheer', 1.2); shake = 0.6; camPunch = 7; hitstop = 0.07; crowd.excite = 1.2;
   fame(tune.fame_spell, 'FULMEN!', k.x, k.z); flash(k.x, 2.6, k.z, 3, 0x9F97FF, false, 0.25);
+  const fi = s.foes.find(f => alive(f) && KIND[f.kind].idol === 'fulmen'); if (fi && !near.some(p => p[0] === fi)) near.push([fi, 0]); // the sky finds Fulmen's own idol
   if (!near.length) { bolt(k.x + Math.sin(k.yaw) * 3, k.z + Math.cos(k.yaw) * 3); return; }
   for (const [e] of near) { bolt(e.x, e.z); hitEnemy(e, k, spellBlow('fulmen', tune.fulmen_dmg, 1.5, tune.fulmen_stun, 'stun')); }
 }
@@ -3059,14 +4148,14 @@ function terrakSpikes(k) {
   }
 }
 function noxBlink(k) {
-  const s = state, e = s.enemy && alive(s.enemy) ? s.enemy : s.foes.find(alive);
+  const s = state, ni = s.foes.find(f => alive(f) && KIND[f.kind].idol === 'nox'), e = ni || (s.enemy && alive(s.enemy) ? s.enemy : s.foes.find(alive)); // Nox finds its own idol
   sfx('shadow'); sfx('cheer', 1); fame(tune.fame_spell, 'NOX!', k.x, k.z);
   burst(k.x, 1, k.z, 'shadow', 22, 3, 2); flash(k.x, 1.2, k.z, 2.8, 0x6A5AB8, false, 0.3);
   s.noxT = tune.nox_slow_time;
   if (!e) return;
   const a = Math.atan2(k.x - e.x, k.z - e.z) + Math.PI, d = e.r + k.r + 0.35; // the far side of the foe
   let nx = e.x + Math.sin(a) * d, nz = e.z + Math.cos(a) * d;
-  const r = Math.hypot(nx, nz), R = tune.arena_radius - k.r; if (r > R) { nx *= R / r; nz *= R / r; }
+  const r = Math.hypot(nx, nz), R = AR() - k.r; if (r > R) { nx *= R / r; nz *= R / r; }
   k.x = k.px = nx; k.z = k.pz = nz; k.yaw = Math.atan2(e.x - k.x, e.z - k.z);
   burst(k.x, 1, k.z, 'shadow', 22, 3, 2); flash(k.x, 1.2, k.z, 2.8, 0x6A5AB8, false, 0.3);
   slowT = Math.max(slowT, 0.3); camPunch = 6;
@@ -3215,6 +4304,7 @@ function ignarBlast(k) {
 function hitEnemy(e, k, m) {
   const s = state, hx = (e.x + k.x) / 2, hz = (e.z + k.z) / 2;
   const D = KIND[e.kind];
+  if (D.idol) { idolHit(e, k, m); return; } // an idol: only its god's spell
   // Cassius's shield covers his front while it is up
   if (D.guards && e.guard && !m.magic && e.state !== 'stun' && e.state !== 'guardbreak') {
     const toK = Math.atan2(k.x - e.x, k.z - e.z);
@@ -3247,7 +4337,16 @@ function hitEnemy(e, k, m) {
     events.push({ type: 'deflected' });
     return;
   }
+  if (D.dark && !(s.lightT > 0)) { // Valerian's darkness swallows the blow: only the Light Sword cuts it
+    e.hp = Math.max(1, e.hp - m.dmg * tune.sorcerer_dark_mult); e.flash = 0.35; k.comboHits = 0;
+    sfx('shadow'); burst(hx, 1.2, hz, 'shadow', 8, 2.5, 2); if (!m.magic) m.recover += 0.2;
+    if (s.t - (e.noT ?? -9) > 0.9) { e.noT = s.t; popup('BÓNG TỐI NUỐT ĐÒN', e.x, e.z, '#B8A8F0', 22); }
+    say('dark', 'Bóng tối nuốt hết đòn kiếm! PHẢN ĐÒN hoặc gạt cầu bóng tối để nạp ánh sáng vào chuôi kiếm của cha!', 4.5, 3, 14);
+    events.push({ type: 'darkhit' });
+    return;
+  }
   let dmg = m.dmg * (s.frenzy > 0 ? tune.frenzy_dmg_mult : 1) * (1 + tune.kael_dmg_per_ch * (FIGHTS[s.fight].ch - 1));
+  if (D.dark) dmg *= tune.light_dmg_mult; // the Light Sword
   if (e.state === 'stun' || e.state === 'dazed' || e.state === 'guardbreak') dmg *= tune.stun_damage_mult;
   if (m.magic && D.boss) dmg *= tune.boss_spell_mult;
   if (D.hide && !m.magic && e.state !== 'stun' && e.state !== 'dazed') { // the lion's hide, the chariot's shell: blades bounce until it reels
@@ -3256,7 +4355,7 @@ function hitEnemy(e, k, m) {
   }
   // an execution: a heavy, a lunge or a bash on a reeling foe near the end finishes it, in slow time
   const reeling = e.state === 'stun' || e.state === 'dazed' || e.state === 'guardbreak' || e.state === 'stagger';
-  const exec = reeling && (m.heavy || m.dash || m.bash) && !m.magic && !D.beast && !D.chariot && !(D.enrageAt && !e.enraged) && !(s.fight === 0 && !tutorialDone)
+  const exec = reeling && (m.heavy || m.dash || m.bash) && !m.magic && !D.beast && !D.chariot && !(D.enrageAt && !e.enraged) && !(D.dark && !e.phase3) && !(s.fight === 0 && !tutorialDone)
     && e.hp - dmg <= e.maxHp * tune.exec_hp;
   if (exec) dmg = Math.max(dmg, e.hp);
   e.hp -= dmg; e.flash = 1; e.lastBlow = m;
@@ -3270,7 +4369,7 @@ function hitEnemy(e, k, m) {
   k.comboHits++; k.comboT = tune.combo_gap; k.maxCombo = Math.max(k.maxCombo, k.comboHits); s.maxCombo = Math.max(s.maxCombo, k.comboHits);
   if (k.comboHits >= 3) fame(tune.fame_combo_hit, 'COMBO ×' + k.comboHits, e.x, e.z);
   if (m.heavy) fame(tune.fame_heavy);
-  const dx = e.x - k.x, dz = e.z - k.z, d = Math.hypot(dx, dz) || 1, kb = m.knock !== undefined ? m.knock : m.heavy ? 3.4 : m.spin ? 3.6 : m.dash ? 3 : m.step === 3 ? 2.6 : 1.3;
+  const dx = e.x - k.x, dz = e.z - k.z, d = Math.hypot(dx, dz) || 1, kb = (m.knock !== undefined ? m.knock : m.heavy ? tune.knock_heavy : m.bash ? tune.knock_bash : m.spin ? tune.knock_spin : m.dash ? 3 : m.step === 3 ? 2.6 : 1.3) * (D.boss && !m.magic ? tune.knock_boss_mult : 1);
   e.kbx = dx / d * kb; e.kbz = dz / d * kb;
   hitstop = Math.max(hitstop, tune.hit_hitstop * (m.heavy ? 1.7 : 1)); shake = Math.max(shake, m.heavy ? 0.3 : 0.12);
   sfx(m.heavy || m.spin ? 'bigHit' : 'hit'); burst(hx, 1.1, hz, 'spark', m.heavy || m.spin ? 12 : 6, 3.8);
@@ -3298,7 +4397,10 @@ function hitEnemy(e, k, m) {
     e.enraged = true; e.state = 'roar'; e.t = 0; e.move = null; e.red = 0; e.tele = null; e.jump = 0; sfx('roar'); shake = 0.5; crowd.excite = 1.1; sfx('cheer', 1);
     say('enrage' + e.kind, D.enrageSay, 4, 3);
     events.push({ type: 'enrage' });
-    if (D.phaseCut && CUTS[D.phaseCut] && tune.cutscenes > 0) startCut(CUTS[D.phaseCut](), null); // Kẻ Bất Bại's mask: a word mid-fight
+    if (D.phaseCut && CUTS[D.phaseCut] && tune.cutscenes > 0 && !e.shade) startCut(CUTS[D.phaseCut](), null); // Kẻ Bất Bại's mask: a word mid-fight
+    if (D.dark) towerPhase(e, 2);
+  } else if (D.dark && e.enraged && !e.phase3 && e.hp <= e.maxHp * tune.sorcerer_phase3) { // Valerian's last third
+    e.phase3 = true; e.state = 'roar'; e.t = 0; e.move = null; e.red = 0; e.tele = null; sfx('roar'); shake = 0.6; towerPhase(e, 3);
   }
 }
 /** An enemy blow reaching Kael: dodged, parried, blocked, or taken. */
@@ -3366,6 +4468,7 @@ function parry(e, k) {
   events.push({ type: 'parry' });
   if (s.fight === 0 && !tutorialDone) tut.result = 'parried';
   else say('parryok', ['Đẹp lắm! Giờ trả đòn!', 'Phản hay! Chém nó đi!', 'Nghe đám đông kìa!'][s.parries % 3], 2.2, 1, 6);
+  lightGain();
 }
 /** An arrow met with the shield at the right moment: it glances away; the crowd likes it, the archer is far and does not reel. */
 function deflectArrow(e, k) {
@@ -3376,6 +4479,7 @@ function deflectArrow(e, k) {
   flash(k.x + Math.sin(k.yaw) * 0.6, 1.3, k.z + Math.cos(k.yaw) * 0.6, 1.8, 0xFFFFFF, false, 0.18);
   fame(tune.fame_deflect, 'GẠT TÊN!', k.x, k.z);
   events.push({ type: 'parry', arrow: true });
+  lightGain();
 }
 /** Denarii won: Varro takes his share first. Returns what Kael keeps. */
 function earn(gross) {
@@ -3407,8 +4511,13 @@ function killEnemy(e) {
   e.hp = 0; e.move = null; e.red = 0; e.tele = null; e.t = 0; e.jump = 0;
   const D = KIND[e.kind], lb = e.lastBlow || {};
   e.state = F.mercy && !D.fodder ? 'kneel' : 'dead';
+  if (D.dark) { s.hordeLeft = 0; for (const o of s.foes) o.riseT = 0; for (const o of s.foes) if (o !== e && alive(o)) { o.hp = 0; o.state = 'dead'; o.t = 0; o.move = null; o.tele = null; burst(o.x, 1, o.z, 'shadow', 12, 2, 2); } } // his shadows go with him
   if (e.state === 'dead' && !D.beast && !D.chariot && (lb.heavy || lb.spin || lb.magic || lb.dash || D.fodder)) { // thrown by the last blow
     e.fling = true; if (!e.vy) e.vy = tune.launch_vy * (D.fodder ? 1 : 0.75); e.kbx *= 2.2; e.kbz *= 2.2;
+  }
+  if (e.shade && F.tower && F.tower < 3 && !e.risen && lb.dmg !== undefined && !(lb.heavy || lb.spin || lb.magic || lb.dash || lb.bash || lb.trap) && (!D.fodder || rng() < tune.shade_rise_fodder)) {
+    e.riseT = tune.shade_rise_time; popup('CHƯA TAN...', e.x, e.z, '#B8A8F0', 22);
+    say('rise', 'Bóng ma chưa tan đâu! Đòn nhẹ chỉ làm nó gục: dứt điểm bằng đòn nặng, xoay kiếm, lao đâm hay phép!', 4, 3, 30);
   }
   if (D.fodder) {
     const mk = s.t - s.lastKillT < tune.multikill_window ? s.multi + 1 : 1; s.multi = mk; s.lastKillT = s.t; s.kills++;
@@ -3420,7 +4529,7 @@ function killEnemy(e) {
     mate.enraged = true; mate.state = 'roar'; mate.t = 0; mate.move = null; mate.red = 0; mate.tele = null; sfx('roar'); shake = 0.4;
     say('enrage' + mate.kind, KIND[mate.kind].enrageSay, 4, 3); events.push({ type: 'enrage' });
   }
-  if (s.foes.some(alive) || s.hordeLeft > 0) { // one down, more still standing
+  if (s.foes.some(alive) || s.hordeLeft > 0 || traps.some(t => t.spawn) || s.foes.some(o => o.riseT > 0)) { // one down, more still standing (or on the way up a hatch)
     if (D.fodder) { sfx('thud'); events.push({ type: 'down', kind: e.kind }); return; }
     sfx('thud'); sfx('cheer', 0.9); crowd.excite = Math.max(crowd.excite, 0.8); shake = 0.3; popup('HẠ MỘT!', e.x, e.z, '#F4EBD0', 28);
     const left = s.foes.filter(alive).length + s.hordeLeft;
@@ -3464,8 +4573,8 @@ function choosePattern(e) {
     else if (tut.step === 2) e.pattern = { m: ['heavy'] };
     else e.pattern = { m: ['slow'] };
   } else {
-    let opts = D.patterns.filter(p => (!p.enraged || e.enraged) && (!p.minDist || d >= p.minDist) && (!p.maxDist || d <= p.maxDist));
-    if (!opts.length) opts = D.patterns.filter(p => !p.enraged || e.enraged);
+    let opts = D.patterns.filter(p => (!p.enraged || e.enraged) && (!p.p3 || e.phase3) && (!p.minDist || d >= p.minDist) && (!p.maxDist || d <= p.maxDist));
+    if (!opts.length) opts = D.patterns.filter(p => (!p.enraged || e.enraged) && (!p.p3 || e.phase3));
     let sum = 0; opts.forEach(p => sum += p.w);
     let r = rng() * sum; e.pattern = opts[opts.length - 1];
     for (const p of opts) { r -= p.w; if (r <= 0) { e.pattern = p; break; } }
@@ -3524,24 +4633,24 @@ function updateEnemy(e, dt) {
       if (T < m.windup) {
         const late = T > m.windup * 0.7;
         if (!m.aoe || m.aoe === 'self' || m.aoe === 'target') turnToward(e, toK, (late ? 1.0 : 5) * dt);
-        if (m.aoe === 'target' && !late) { const r = Math.hypot(k.x, k.z), R = tune.arena_radius - 1; e.tele = { x: r > R ? k.x * R / r : k.x, z: r > R ? k.z * R / r : k.z, r: m.aoeR }; } // it follows Kael, then holds
+        if (m.aoe === 'target' && !late) { const r = Math.hypot(k.x, k.z), R = AR() - 1; e.tele = { x: r > R ? k.x * R / r : k.x, z: r > R ? k.z * R / r : k.z, r: m.aoeR }; } // it follows Kael, then holds
         if (m.rain && !e.rained && T > m.windup - 0.2 && e.tele) { // the arrows come down on the ring
           e.rained = true;
           for (let n = 0; n < 10; n++) { const a = deco() * TAU, r = Math.sqrt(deco()) * e.tele.r, x = e.tele.x + Math.cos(a) * r, z = e.tele.z + Math.sin(a) * r; shootArrow(x - 1.2, 9, z - 1.2, x, 0.05, z, 0.2 + deco() * 0.05); }
         }
         if (m.aoe === 'front') { turnToward(e, toK, (late ? 0 : 3) * dt); e.tele = { x: e.x + Math.sin(e.yaw) * m.aoeOff, z: e.z + Math.cos(e.yaw) * m.aoeOff, r: m.aoeR }; }
         if (m.aoe === 'self') e.tele = { x: e.x, z: e.z, r: m.aoeR };
-        const gp = m.blink ? 'shadow' : { terrak: 'dust', fulmen: 'bolt', water: 'water' }[m.fx];
+        const gp = m.blink ? 'shadow' : { terrak: 'dust', fulmen: 'bolt', water: 'water', shadow: 'shadow', fire: 'ember' }[m.fx];
         if (gp && Math.floor(T * 12) !== Math.floor((T - dt) * 12)) burst(e.x, 1.4, e.z, gp, 3, 1.6, 1.6);
         if (m.blink && !e.blinked && T > m.windup * tune.boss_blink_at) {
           e.blinked = true; burst(e.x, 1, e.z, 'shadow', 22, 3, 2); flash(e.x, 1.2, e.z, 2.6, 0x6A5AB8, false, 0.3);
           const a = k.yaw + Math.PI, d = e.r + k.r + 0.7; let nx = k.x + Math.sin(a) * d, nz = k.z + Math.cos(a) * d;
-          const r = Math.hypot(nx, nz), Rr = tune.arena_radius - e.r; if (r > Rr) { nx *= Rr / r; nz *= Rr / r; }
+          const r = Math.hypot(nx, nz), Rr = AR() - e.r; if (r > Rr) { nx *= Rr / r; nz *= Rr / r; }
           e.x = e.px = nx; e.z = e.pz = nz; e.yaw = Math.atan2(k.x - e.x, k.z - e.z);
           burst(e.x, 1, e.z, 'shadow', 22, 3, 2); flash(e.x, 1.2, e.z, 2.6, 0x6A5AB8, false, 0.3); sfx('shadow');
           popup('SAU LƯNG!', k.x, k.z, '#C8B8FF', 24);
         }
-        if (m.pounce && !late) { const r = Math.hypot(k.x, k.z), R = tune.arena_radius - 1; e.tele = { x: r > R ? k.x * R / r : k.x, z: r > R ? k.z * R / r : k.z, r: m.aoeR }; }
+        if (m.pounce && !late) { const r = Math.hypot(k.x, k.z), R = AR() - 1; e.tele = { x: r > R ? k.x * R / r : k.x, z: r > R ? k.z * R / r : k.z, r: m.aoeR }; }
         if (m.red) e.red = 0.55 + 0.45 * Math.sin(T * 28);
         else if (T > m.windup - 0.28) { if (e.glint === 0 && T - dt <= m.windup - 0.28) sfx('glint'); e.glint = 1; }
         if (m.red && s.fight === 0 && !tutorialDone && tut.step === 2) say('t2tell' + tut.tries, line('Nó loé đỏ: LĂN! (Space)', 'Nó loé đỏ: LĂN! (nút lăn)'), 2.2, 3);
@@ -3567,7 +4676,7 @@ function updateEnemy(e, dt) {
           const cs = m.chargeSpeed || tune.grull_charge_speed;
           e.vx = Math.sin(e.yaw) * cs; e.vz = Math.cos(e.yaw) * cs;
           if (!e.hitDone && dist < e.r + k.r + 0.25) { e.hitDone = true; blowOnKael(e, m); }
-          if (Math.hypot(e.x, e.z) > tune.arena_radius - e.r - 0.15) { // rammed the fence
+          if (Math.hypot(e.x, e.z) > AR() - e.r - 0.15) { // rammed the fence
             e.state = 'dazed'; e.t = 0; e.stunT = tune.wall_daze; e.move = null; shake = 0.6; sfx('thud'); sfx('clang');
             burst(e.x * 1.05, 1, e.z * 1.05, 'dust', 12, 3, 2);
             fame(tune.fame_wall, 'ĐÂM VÀO TƯỜNG!', e.x, e.z);
@@ -3588,15 +4697,15 @@ function updateEnemy(e, dt) {
             } else if (m.fx === 'fulmen') { bolt(t.x, t.z); shake = Math.max(shake, 0.45); sfx('thunder'); } // Fulmen: the bolt comes down on the ring
             else if (m.fx) { // fire, water, gold: a burst and a ring the size of the blow
               if (m.fx === 'water' && m.aoe === 'self') waterWall(t.x, t.z, t.r);
-              burst(t.x, 0.2, t.z, m.fx, 24, 4.5, 3); groundRing(t.x, t.z, m.fx === 'water' ? 0xA8D4E0 : m.fx === 'fire' ? 0xF08A3A : 0xE9C46A, 0.4, t.r, 0.45, 0.6);
-              shake = Math.max(shake, 0.4); sfx(m.fx === 'water' ? 'heavySwish' : 'ignar');
+              burst(t.x, 0.2, t.z, m.fx, 24, 4.5, 3); groundRing(t.x, t.z, m.fx === 'water' ? 0xA8D4E0 : m.fx === 'fire' ? 0xF08A3A : m.fx === 'shadow' ? 0x8A6AD8 : 0xE9C46A, 0.4, t.r, 0.45, 0.6);
+              shake = Math.max(shake, 0.4); sfx(m.fx === 'water' ? 'heavySwish' : m.fx === 'shadow' ? 'shadow' : 'ignar');
             } else if (!m.rain) { burst(t.x, 0.1, t.z, 'dust', 12, 4, 1.6); shake = Math.max(shake, 0.3); if (m.aoe === 'front') sfx('thud'); }
             else { burst(t.x, 0.1, t.z, 'dust', 10, 2, 1); sfx('stone'); }
             if (Math.hypot(k.x - t.x, k.z - t.z) <= t.r + k.r * 0.5) blowOnKael(e, m);
           } else if (m.ranged) { // the arrow flies where the archer faces; it strikes as it leaves (quick enough to look true)
             const ax = e.x + Math.sin(e.yaw) * 0.6, az = e.z + Math.cos(e.yaw) * 0.6, on = dist <= m.range + k.r && Math.abs(angDiff(toK, e.yaw)) <= m.arc / 2 * DEG + 0.12;
             const L = on ? dist : m.range, tx = e.x + Math.sin(e.yaw) * L, tz = e.z + Math.cos(e.yaw) * L;
-            shootArrow(ax, 1.45, az, tx, on ? 1.2 : 0.3, tz, Math.max(0.05, L / tune.archer_arrow_speed));
+            (m.orb ? shadowOrb : shootArrow)(ax, 1.45, az, tx, on ? 1.2 : 0.3, tz, Math.max(0.05, L / (m.orb ? tune.sorcerer_bolt_speed : tune.archer_arrow_speed)));
             if (on) blowOnKael(e, m);
           } else if (dist <= m.range + k.r && Math.abs(angDiff(toK, e.yaw)) <= m.arc / 2 * DEG + 0.2) blowOnKael(e, m);
           e.tele = null;
@@ -3620,11 +4729,12 @@ function updateEnemy(e, dt) {
     case 'stagger': if (e.t >= tune.grull_stagger) { e.state = 'circle'; e.t = 0; e.thinkT = 0.3; } break;
     case 'roar': if (e.t >= 1.4) { e.state = 'circle'; e.t = 0; e.thinkT = 0.2; } if (e.t < 0.3 && dist < 3) { k.kbx = dx / dist * 5; k.kbz = dz / dist * 5; } break;
   }
+  if (D.idol) { e.vx = e.vz = 0; e.kbx = e.kbz = 0; if (e.hx !== undefined) { e.x = e.hx; e.z = e.hz; } } // an idol does not move
 }
 
 /** How far the chariot can run straight ahead before the fence. */
 function laneLen(e) {
-  const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw), R = tune.arena_radius - e.r;
+  const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw), R = AR() - e.r;
   const b = e.x * fx + e.z * fz, c = e.x * e.x + e.z * e.z - R * R;
   return Math.max(0.5, -b + Math.sqrt(Math.max(0, b * b - c)));
 }
@@ -3669,7 +4779,7 @@ function updateChariot(e, dt, k, dist, toK, fightOn) {
         events.push({ type: 'crash' });
         break;
       }
-      if (Math.hypot(e.x, e.z) > tune.arena_radius - e.r - 0.3 && e.t > 0.2) { e.state = 'turn'; e.t = 0; e.move = null; burst(e.x, 0.2, e.z, 'dust', 12, 3, 1.5); }
+      if (Math.hypot(e.x, e.z) > AR() - e.r - 0.3 && e.t > 0.2) { e.state = 'turn'; e.t = 0; e.move = null; burst(e.x, 0.2, e.z, 'dust', 12, 3, 1.5); }
       if (Math.floor(e.t * 14) !== Math.floor((e.t - dt) * 14)) burst(e.x, 0.1, e.z, 'dust', 2, 1, 1);
       fireTrail(e, dt, 1);
       break;
@@ -3732,7 +4842,7 @@ function moveFighter(f, dt) {
     if (f.y <= 0) { f.y = 0; f.vy = 0; burst(f.x, 0.1, f.z, 'dust', 8, 2.5, 1.5); sfx('thud'); shake = Math.max(shake, 0.18); }
   }
   const kd = Math.exp(-10 * dt); f.kbx *= kd; f.kbz *= kd;
-  const R = f.state === 'enter' ? 99 : tune.arena_radius - f.r, r = Math.hypot(f.x, f.z);
+  const R = f.state === 'enter' ? 99 : AR() - f.r, r = Math.hypot(f.x, f.z);
   if (r > R) { f.x *= R / r; f.z *= R / r; }
   f.odo = (f.odo || 0) + Math.hypot(f.x - f.px, f.z - f.pz);
   const sp = Math.hypot(f.vx, f.vz);
@@ -3742,7 +4852,10 @@ function moveFighter(f, dt) {
 function separate(a, b) {
   if (!alive(a) || !alive(b) || b.state === 'enter') return;
   const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz), min = a.r + b.r;
-  if (d < min && d > 0.0001) { const push = (min - d) / 2; a.x -= dx / d * push; a.z -= dz / d * push; b.x += dx / d * push; b.z += dz / d * push; }
+  if (d < min && d > 0.0001) { // an idol stands its ground: the other one is pushed off it
+    const push = (min - d) / 2, ia = (KIND[a.kind] || {}).idol, ib = (KIND[b.kind] || {}).idol, wa = ia ? 0 : ib ? 2 : 1, wb = ib ? 0 : ia ? 2 : 1;
+    a.x -= dx / d * push * wa; a.z -= dz / d * push * wa; b.x += dx / d * push * wb; b.z += dz / d * push * wb;
+  }
 }
 
 // ---- Mercy: Tha hay Giết ---------------------------------------------------------------------
@@ -3762,8 +4875,8 @@ function decideMercy(choice) {
   const s = state, M = s.mercy; if (!M || M.choice) return;
   M.choice = choice; M.actT = 0; s.choice = choice; s.choices[s.fight] = choice;
   const k = s.kael, e = s.enemy;
-  if (s.fight === 14) s.sabinaAlly = choice === 'tha';
-  if (s.fight === 44) s.brennusDead = choice === 'giet';
+  if (s.fight === 9) s.sabinaAlly = choice === 'tha';
+  if (s.fight === 23) s.brennusDead = choice === 'giet';
   if (choice === 'giet') { k.move = kaelMoveDef('heavy'); k.state = 'attack'; k.t = 0; k.hitDone = true; s.huyet++; const keep = earn(tune.kill_purse); popup(`+${keep} DENARII MÁU`, k.x, k.z, '#E9B8A8', 24); }
   else { k.state = 'sheathe'; k.t = 0; e.state = 'spared'; e.t = 0; s.nghia++; sfx('cheer', 0.5); }
   events.push({ type: 'choice', choice });
@@ -3801,7 +4914,7 @@ function afterFight() {
   const s = state, i = s.fight, F = FIGHTS[i], chain = [];
   if (F.after && CUTS[F.after]) chain.push(F.after);
   if (chapterEnds(i) && CUTS['end' + F.ch]) chain.push('end' + F.ch);
-  const go = () => { scene = 'play'; if (i >= FIGHTS.length - 1) showEnding(); else if (chapterEnds(i)) endChapter(F.ch); else setupFight(i + 1, true); };
+  const go = () => { scene = 'play'; if (i >= FIGHTS.length - 1) showEnding(); else if (chapterEnds(i) && F.ch !== 5) endChapter(F.ch); else setupFight(i + 1, true); }; // Nhật Thực runs straight into the tower
   const run = j => j >= chain.length ? go() : startCut(CUTS[chain[j]](), () => run(j + 1));
   run(0);
 }
@@ -3847,11 +4960,14 @@ function stepWorld(dt, realDt) {
       if (s.phase === 'fight' && s.hordeLeft > 0 && alive(k)) { // the horde: through the gate a few at a time
         const F = FIGHTS[s.fight], up = foes.filter(f => alive(f) && KIND[f.kind].fodder).length;
         s.hordeT -= dt;
-        if (s.hordeT <= 0 && up < tune.horde_at_once + (F.ch >= 3 ? 1 : 0)) {
-          s.hordeT = tune.horde_gap; s.hordeLeft--;
-          const e = newFighter('thug', false, F.ch - 1), x = (rng() - 0.5) * 3.2;
-          Object.assign(e, { x, z: -FENCE_R - 0.6, px: x, pz: -FENCE_R - 0.6, yaw: 0, state: 'enter' }); foes.push(e);
-          if (s.hordeLeft === s.hordeMax - 1) { say('horde' + s.fight, 'Cổng mở! Lính quèn ùa vào: chém xoay vòng, gọi thần, dọn sạch!', 3.2, 2, 30); sfx('cheer', 0.8); events.push({ type: 'horde', n: s.hordeMax }); }
+        if (s.hordeT <= 0 && up < (F.tower ? tune.tower_horde_at_once : tune.horde_at_once + (F.ch >= 3 ? 1 : 0))) {
+          s.hordeT = F.tower ? tune.tower_horde_gap : tune.horde_gap; s.hordeLeft--;
+          const door = s.hordeLeft % 2 === 0 && traps.find(t => t.type === 'door' && t.state === 'shut' && Math.hypot(t.x - k.x, t.z - k.z) > 2.5);
+          if (door) openDoor(door, 'thug');
+          else if (F.tower) spawnShade('thug'); // in the tower they rise from the floor
+          else { const e = newFighter('thug', false, F.ch - 1), x = (rng() - 0.5) * 3.2;
+            Object.assign(e, { x, z: -FENCE_R - 0.6, px: x, pz: -FENCE_R - 0.6, yaw: 0, state: 'enter' }); foes.push(e); }
+          if (s.hordeLeft === s.hordeMax - 1) { say('horde' + s.fight, F.tower ? 'Bóng ma trồi lên từ sàn tháp! Chém xoay vòng, gọi thần, dọn sạch!' : 'Cổng mở! Lính quèn ùa vào: chém xoay vòng, gọi thần, dọn sạch!', 3.2, 2, 30); sfx('cheer', 0.8); events.push({ type: 'horde', n: s.hordeMax }); }
         }
       }
       updateTutorial(dt);
@@ -3860,15 +4976,21 @@ function stepWorld(dt, realDt) {
     } else { k.t += dt; for (const f of foes) f.t += dt; if (k.flash > 0) k.flash -= dt * 5; }
     if (k.state === 'dead' || k.state === 'victory' || k.state === 'sheathe' || (scene === 'mercy' && k.state === 'free')) { k.vx = k.vz = 0; }
     if (scene !== 'play') for (const f of foes) { f.vx = f.vz = 0; }
-    if (FIGHTS[s.fight].water && scene === 'play') { // wading: Kael is slower, and splashes
-      k.vx *= tune.water_slow; k.vz *= tune.water_slow;
+    const wet = FIGHTS[s.fight].water ? tune.water_slow : waterMesh && waterMesh.visible ? tune.shallow_slow : 0;
+    if (muds.length && scene === 'play') for (const f of [k, ...foes]) if (inMud(f)) { // the mud of Hố Cát: slow, and it splashes
+      f.vx *= tune.mud_slow; f.vz *= tune.mud_slow;
+      if (Math.hypot(f.vx, f.vz) > 0.8 && Math.floor(s.t * 5) !== Math.floor((s.t - realDt) * 5)) burst(f.x, 0.15, f.z, 'dust', 2, 1.2, 1.2);
+    }
+    if (wet && scene === 'play') { // wading: Kael is slower, and splashes
+      k.vx *= wet; k.vz *= wet;
       if (Math.hypot(k.vx, k.vz) > 1 && Math.floor(s.t * 6) !== Math.floor((s.t - realDt) * 6)) burst(k.x, 0.2, k.z, 'water', 3, 1.6, 1.6);
       for (const f of foes) if (Math.hypot(f.vx, f.vz) > 1.5 && Math.floor(s.t * 5) !== Math.floor((s.t - realDt) * 5)) burst(f.x, 0.2, f.z, 'water', 2, 1.4, 1.4);
     }
     moveFighter(k, dt); for (const f of foes) moveFighter(f, fdt);
-    for (let i = foes.length - 1; i >= 0; i--) { const f = foes[i]; if (KIND[f.kind].fodder && f.state === 'dead' && f.t > tune.body_time && !f.vy) { // fallen fodder is dragged off
+    for (let i = foes.length - 1; i >= 0; i--) { const f = foes[i]; if (KIND[f.kind].fodder && f.state === 'dead' && f.t > tune.body_time && !f.vy && !(f.riseT > 0)) { // fallen fodder is dragged off
       removeFighter(f); foes.splice(i, 1); if (s.enemy === f) s.enemy = foes.find(alive) || foes[0] || null; } }
     if (pillars.length) { pushOutOfPillars(k); for (const f of foes) if (!KIND[f.kind].chariot) pushOutOfPillars(f); }
+    updateTraps(dt); updateArenaDress(dt); updateTower(dt);
     if (scene === 'play') {
       for (const f of foes) separate(k, f);
       for (let i = 0; i < foes.length; i++) for (let j = i + 1; j < foes.length; j++) separate(foes[i], foes[j]);
@@ -3901,13 +5023,15 @@ function syncFighter(f, a) {
   const fig = FIG.get(f); if (!fig) return;
   fig.root.position.set(lerp(f.px, f.x, a), f.y || 0, lerp(f.pz, f.z, a));
   fig.root.rotation.y = f.yaw;
-  if (fig.chariot) chariotPose(fig, f); else if (fig.beast) lionPose(fig, f); else if (fig.modelFig) { modelPose(fig, f); modelTrail(fig, f); } else { applyPose(fig, f, computePose(f)); updateTrail(fig, f); }
+  if (fig.idol) idolPose(fig, f); else if (fig.chariot) chariotPose(fig, f); else if (fig.beast) lionPose(fig, f); else if (fig.modelFig) { modelPose(fig, f); modelTrail(fig, f); } else { applyPose(fig, f, computePose(f)); updateTrail(fig, f); }
   if (fig.netM) fig.netM.visible = (f.netT || 0) > 0;
   const frenzy = f.kind === 'kael' && state.frenzy > 0 ? 0.22 + 0.12 * Math.sin(vt * 10) : 0;
   const casting = f.kind === 'kael' && f.state === 'attack' && f.move && f.move.god && f.t < f.move.windup + f.move.active;
   const fire = casting && f.move.god === 'ignar' ? 0.35 + 0.15 * Math.sin(vt * 30) : f.kind === 'kael' ? 0 : Math.max(0, f.burn || 0) * 0.6;
   tintFigure(fig, f.red || 0, Math.max(0, f.flash) * 0.7, frenzy, fire);
   if (f.kind !== 'kael' && state.noxT > 0 && FIGHTS && state.foes.includes(f)) for (const m of fig.mats) { m.emissive.r += 0.1; m.emissive.b += 0.22; }
+  if (f.shade || f.dark) { const w = fig.modelFig ? tune.model_glow : 1, p = 0.5 + 0.5 * Math.sin(vt * 3 + f.id); for (const m of fig.mats) { m.emissive.r += (0.08 + 0.05 * p) * w; m.emissive.b += (0.2 + 0.1 * p) * w; } } // shadows and the sorcerer glow dark purple
+  if (f.kind === 'kael' && state.lightT > 0) { const w = (0.35 + 0.1 * Math.sin(vt * 12)) * (fig.modelFig ? tune.model_glow : 1); for (const m of fig.mats) { m.emissive.r += w; m.emissive.g += w * 0.85; m.emissive.b += w * 0.4; } } // the Light Sword
   if (casting && f.move.god !== 'ignar') { const c = GODS[f.move.god].tint, w = (0.3 + 0.15 * Math.sin(vt * 30)) * (fig.modelFig ? tune.model_glow : 1); for (const m of fig.mats) m.emissive.setRGB(c[0] * w, c[1] * w, c[2] * w); }
   const stunned = f.state === 'stun' || f.state === 'dazed';
   fig.stars.visible = stunned; if (stunned) fig.stars.rotation.y = vt * 6;
@@ -3999,7 +5123,7 @@ function toggleView() {
   events.push({ type: 'view', view });
 }
 function project(x, y, z) { _v.set(x, y, z).project(camera); return { x: (_v.x + 1) / 2 * W, y: (1 - _v.y) / 2 * H, front: _v.z < 1 }; }
-function render3d() { renderer.render(scene3, camera); }
+function render3d() { if (towerOn) renderMirrors(); renderer.render(scene3, camera); }
 
 // ---- HUD -----------------------------------------------------------------------------------
 function bar(x, y, w, h, v, fill, back = 'rgba(28,20,13,0.85)', edge = '#A8743A') {
@@ -4063,6 +5187,7 @@ function icons() { // view switch, pause and mute, top right, drawn
 }
 function drawHUD() {
   const s = state, k = s.kael, e = s.enemy;
+  if (towerOn) towerVignette();
   // Kael
   textO('KAEL', 24, 22, 20, '#F4EBD0', 'left', SERIF);
   bar(24, 38, 300, 16, k.hp / k.maxHp, k.flash > 0 ? '#E8D8C8' : '#A6402F');
@@ -4089,6 +5214,12 @@ function drawHUD() {
   // the purse: what Kael keeps, towards the freedom price
   ctx.fillStyle = '#E8B830'; ctx.beginPath(); ctx.arc(34, 218, 8, 0, TAU); ctx.fill(); ctx.strokeStyle = '#8A6A20'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(34, 218, 5, 0, TAU); ctx.stroke();
   textO(`${s.purse.toLocaleString('vi-VN')} / ${tune.freedom_price.toLocaleString('vi-VN')} DENARII`, 50, 219, 15, s.purse >= tune.freedom_price ? '#BFD8C0' : '#F2C94C', 'left');
+  const Ft = FIGHTS[s.fight];
+  if (Ft.tower === 2 || Ft.tower === 3) { // the father's hilt: the gods' light won back on Tầng Thần; on the bridge, the Light Sword
+    const lit = s.lightT > 0, u = Ft.tower === 2 ? (s.blade || 0) / 5 : lit ? s.lightT / tune.light_time : (s.light || 0) / 100;
+    bar(24, 238, 300, 12, u, lit ? (Math.sin(vt * 16) > 0 ? '#FFF0B0' : '#F6D66A') : '#E9C46A', 'rgba(28,20,13,0.85)', lit ? '#FFF0B0' : '#A8743A');
+    textO(Ft.tower === 2 ? `CHUÔI KIẾM CỦA CHA · ÁNH SÁNG ${s.blade || 0}/5` : lit ? `THÁNH KIẾM BỪNG SÁNG ${Math.ceil(s.lightT)}s` : `ÁNH SÁNG ${Math.floor(s.light || 0)}/100 · PHẢN ĐÒN ĐỂ NẠP`, 24, 264, 15, lit ? '#FFF0B0' : '#E9DFC8', 'left');
+  }
   // Danh Vọng
   const fx = 440, fw = 400;
   const fr = s.frenzy > 0;
@@ -4106,9 +5237,9 @@ function drawHUD() {
   // enemy
   if (e) {
     const D = KIND[e.kind], F = FIGHTS[s.fight];
-    textO(e.vet ? D.name.split(' · ')[0] + (F.ch > 1 ? ' · LÃO LUYỆN' : ' · BÁO THÙ') : D.name, 1120, 22, 20, '#F4EBD0', 'right', SERIF);
+    textO(e.shade ? 'BÓNG MA · ' + D.name.split(' · ')[0] : e.vet ? D.name.split(' · ')[0] + (F.ch > 1 ? ' · LÃO LUYỆN' : ' · BÁO THÙ') : D.name, 1120, 22, 20, '#F4EBD0', 'right', SERIF);
     bar(900, 38, 220, 16, e.hp / e.maxHp, e.flash > 0 ? '#E8D8C8' : (e.burn > 0 ? '#B0563A' : '#7E4A34'));
-    textO(`TRẬN ${s.fight + 1}/${FIGHTS.length}` + (F.boss ? ' · TRÙM' : '') + (e.enraged ? ' · NỔI ĐIÊN' : ''), 1120, 68, 16, e.enraged ? '#FF8A70' : '#C9C2B4', 'right');
+    textO((F.tower ? `TẦNG ${F.tower}/3` : `TRẬN ${s.fight + 1}/${FIGHTS.length}`) + (F.boss ? ' · TRÙM' : '') + (e.enraged ? ' · NỔI ĐIÊN' : ''), 1120, 68, 16, e.enraged ? '#FF8A70' : '#C9C2B4', 'right');
     const named = s.foes.filter(o => o !== e && alive(o) && !KIND[o.kind].fodder);
     named.forEach((o, j) => { // the other foes, smaller
       const y = 94 + j * 30;
@@ -4116,7 +5247,7 @@ function drawHUD() {
       bar(1000, y + 10, 120, 7, o.hp / o.maxHp, o.flash > 0 ? '#E8D8C8' : '#7E4A34');
     });
     const fod = s.foes.filter(o => o !== e && alive(o) && KIND[o.kind].fodder).length + (s.hordeLeft || 0);
-    if (fod > 0) textO(`+ LÍNH QUÈN ×${fod}`, 1120, 98 + named.length * 30, 16, '#E9DFC8', 'right');
+    if (fod > 0) textO(`+ ${F.tower ? 'BÓNG MA' : 'LÍNH QUÈN'} ×${fod}`, 1120, 98 + named.length * 30, 16, '#E9DFC8', 'right');
     if (s.noxT > 0) textO(`NOX: ĐỊCH CHẬM ${Math.ceil(s.noxT)}s`, 1120, 124 + named.length * 30, 15, '#B8A8F0', 'right');
   }
   icons();
@@ -4129,8 +5260,8 @@ function drawHUD() {
     ctx.globalAlpha = clamp(s.say.t * 6, 0, 1) * clamp((s.say.dur - s.say.t) * 4, 0, 1);
     ctx.fillStyle = 'rgba(30,22,14,0.88)'; rrect(bx, by, bw, bh, 10); ctx.fill();
     ctx.strokeStyle = '#A8743A'; ctx.lineWidth = 2; rrect(bx, by, bw, bh, 10); ctx.stroke();
-    portrait(s.coach, bx + 52, by + bh / 2, 36);
-    text(SPEAK[s.coach].name, bx + 106, by + 20, 16, '#D9A45A', 'left', SERIF);
+    portrait(s.say.who || s.coach, bx + 52, by + bh / 2, 36);
+    text(SPEAK[s.say.who || s.coach].name, bx + 106, by + 20, 16, '#D9A45A', 'left', SERIF);
     lines.forEach((l, i) => text(l, bx + 106, by + 46 + i * 24, 19, '#F4EBD0', 'left'));
     ctx.globalAlpha = 1;
   }
@@ -4254,9 +5385,9 @@ const scenes = {
       if (pressed('KeyP') || pressed('Escape')) { scene = 'pause'; return; }
       advance(dt);
     },
-    draw() { drawWorld(ALPHA); drawHUD(); },
+    draw() { drawWorld(ALPHA); drawHUD(); if (DEBUG) drawDebug(); },
   },
-  cut: { update(dt) { updateCut(dt); }, draw() { drawCut(); } },
+  cut: { update(dt) { updateCut(dt); }, draw() { drawCut(); if (DEBUG) drawDebug(); } },
   pause: {
     update() { if (pressed('KeyP') || pressed('Escape') || pressed('Enter')) scene = 'play'; },
     draw() {
@@ -4363,9 +5494,34 @@ function step() {
   updateDrums();
   if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
   if (pressed('KeyV')) { toggleView(); hit.delete('KeyV'); }
+  if (DEBUG) debugKeys();
   scenes[scene].update(STEP); hit.clear();
   fadeA += clamp(fadeTo - fadeA, -STEP * 2.2, STEP * 2.2);
   if (events.length > 300) events.splice(0, events.length - 300);
+}
+/** Debug mode: jump to fight i (0-based) with the gods won before it. */
+function debugJump(i) {
+  i = clamp(i, 0, FIGHTS.length - 1);
+  state.learned = learnedBefore(i); tutorialDone = true; state.titleT = 0; cut = null; scene = 'play';
+  setupFight(i, true);
+  events.push({ type: 'debugjump', fight: i + 1 });
+}
+/** Debug mode: every foe falls and the horde is emptied, so the fight is won. A cut scene is skipped first. */
+function debugWin() {
+  if (scene === 'cut') { endCut(); return; }
+  const s = state;
+  if (scene !== 'play' || !(s.phase === 'fight' || s.phase === 'intro')) return;
+  s.hordeLeft = 0; for (const t of traps) t.spawn = null; for (const e of s.foes) e.riseT = 0;
+  for (const e of s.foes.filter(alive)) { e.lastBlow = {}; if (alive(e)) killEnemy(e); }
+  events.push({ type: 'debugwin', fight: s.fight + 1 });
+}
+function debugKeys() {
+  if (dbgKill) { dbgKill = false; debugWin(); }
+  if (dbgJump) { const j = dbgJump; dbgJump = 0; debugJump(state.fight + j); }
+}
+function drawDebug() {
+  ctx.fillStyle = 'rgba(20,14,8,0.78)'; ctx.fillRect(30, 552, 520, 26);
+  text(`DEBUG · trận ${state.fight + 1}/${FIGHTS.length} · K: thắng ngay · [ ]: trận trước/sau · Shift: 5 trận`, 290, 570, 14, '#F0C860', 'center', FONT, 'bold');
 }
 let last, acc = 0, ALPHA = 1; // ALPHA: how far the frame is between the last two steps
 function tick() {
@@ -4402,20 +5558,21 @@ window.game = {
 // ---- Start: the models parse first (a moment), then the arena and the run -------------------
 const figureLineup = [], figSet = clamp(Number(params.get('set')) || 1, 1, 3);
 function boot() {
-buildArena();
+{ const pre = new Set(scene3.children); buildArena(); for (const o of scene3.children) if (!pre.has(o)) arenaParts.push(o); }
 brennus = newFighter('brennus');
 Object.assign(brennus, { x: brennusSpot.x, y: STAND_Y, z: brennusSpot.z, px: brennusSpot.x, pz: brennusSpot.z, state: 'idle' });
-for (const p of [brennusSpot, varroSpot]) scene3.add(at(box(1.2, STAND_Y, 1.2, mat(0x988D76)), p.x, STAND_Y / 2, p.z));
+for (const p of [brennusSpot, varroSpot]) { const b = at(box(1.2, STAND_Y, 1.2, mat(0x988D76)), p.x, STAND_Y / 2, p.z); scene3.add(b); arenaParts.push(b); }
 for (const w of ['varro', 'herald', 'emperor', 'sabina', 'lyra']) extras[w] = newFighter(w);
 reset(); // opens on the first scene (setupFight starts it)
 if (params.get('scene')) { cut = null; scene = params.get('scene'); }
 if (scene === 'results') { // a check view of an end screen: ?scene=results&ch=2, or &ending=tudo|khoinghia|vua
   const en = params.get('ending'); state.resultT = 9;
   if (en) { Object.assign(state, { purse: 5180, varroTotal: 7770, nghia: 4, huyet: 1, lyra: en === 'tudo', parries: 96, deaths: 7 }); state.result = { mode: 'ending', kind: ENDINGS[en] ? en : 'tudo' }; }
-  else { const ch = clamp(Number(params.get('ch')) || 1, 1, 3); Object.assign(state, { fight: [9, 24, 44][ch - 1], purse: [104, 1280, 3460][ch - 1], parries: 12 * ch, demandsMet: 2 * ch - 2, nghia: ch, huyet: 1 }); state.result = { mode: 'chapter', ch, gross: [260, 2950, 5450][ch - 1], varro: [156, 1770, 3270][ch - 1] }; }
+  else { const ch = clamp(Number(params.get('ch')) || 1, 1, 4); Object.assign(state, { fight: [5, 11, 17, 23][ch - 1], purse: [104, 900, 1900, 3300][ch - 1], parries: 12 * ch, demandsMet: 2 * ch - 2, nghia: ch, huyet: 1 }); state.result = { mode: 'chapter', ch, gross: [260, 2250, 3800, 6200][ch - 1], varro: [156, 1350, 2280, 3720][ch - 1] }; }
 }
 if (!params.get('scene') && tune.start_fight <= 1 && params.get('fresh') !== '1') loadRun(); // a reload goes on from the fight reached
 if (tune.start_fight > 1 && (scene === 'play' || scene === 'cut')) { state.learned = learnedBefore(Math.round(tune.start_fight) - 1); tutorialDone = true; state.titleT = 0; cut = null; scene = 'play'; setupFight(clamp(Math.round(tune.start_fight), 1, FIGHTS.length) - 1, true); } // start later in the ladder (testing)
+if (DEBUG && Number(params.get('fight')) >= 1 && (scene === 'play' || scene === 'cut')) debugJump(Math.round(Number(params.get('fight'))) - 1);
 if (scene === 'figures') { // every fighter in a row, named
   fadeA = fadeTo = 0;
   state.foes.forEach(removeFighter); state.foes = []; state.enemy = null; FIG.get(brennus).root.visible = false;

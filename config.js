@@ -230,14 +230,16 @@ window.CONFIG = {
   cut_blip_vol: { value: 0.14, min: 0, max: 0.4, step: 0.01 },        // the typing voice's loudness
   cut_blip_every: { value: 2, min: 1, max: 6, step: 1 },              // a blip every N letters
 
-  start_fight: { value: 1, min: 1, max: 50, step: 1 },                // the fight a run opens on (1: the lesson); for testing a later fight
+  start_fight: { value: 1, min: 1, max: 33, step: 1 },                // the fight a run opens on (1: the lesson); for testing a later fight
   target_hold: { value: 1.5, min: 0, max: 5, step: 0.1 },             // u another foe must be closer by before Kael turns to it
 
   // ---- Denarii: every fight pays; Varro takes his share first; freedom is bought (the notes: 5000)
-  purse_ch1: { value: 50, min: 0, max: 1000, step: 5 },               // denarii a fight pays in Hố Cát
-  purse_ch2: { value: 120, min: 0, max: 1000, step: 5 },              // in Kinh Đô
-  purse_ch3: { value: 200, min: 0, max: 1500, step: 5 },              // in Colossus
-  purse_ch4: { value: 300, min: 0, max: 2000, step: 5 },              // in Trận Cuối
+  purse_ch1: { value: 60, min: 0, max: 1000, step: 5 },               // denarii a fight pays in Hố Cát
+  purse_ch2: { value: 150, min: 0, max: 1000, step: 5 },              // in Kinh Đô
+  purse_ch3: { value: 250, min: 0, max: 1500, step: 5 },              // in Colossus
+  purse_ch4: { value: 350, min: 0, max: 2000, step: 5 },              // in Vườn Hoàng Đế
+  purse_ch5: { value: 450, min: 0, max: 2500, step: 5 },              // in Nhật Thực (thirty fights pay what fifty did)
+  purse_ch6: { value: 0, min: 0, max: 2500, step: 5 },                // Tháp Sinh Tử pays nothing: only the crowd's fame
   boss_purse_mult: { value: 2.5, min: 1, max: 6, step: 0.1 },         // a boss pays this many times more
   reward_per_fame: { value: 1, min: 0, max: 20, step: 0.5 },          // denarii per point of fame as a fight ends
   demand_purse: { value: 150, min: 0, max: 1000, step: 10 },          // the crowd's demand met: this much more
@@ -252,10 +254,10 @@ window.CONFIG = {
   fame_deflect: { value: 8, min: 0, max: 40, step: 1 },               // an arrow parried off the shield
 
   // ---- Chương 2-4: Kael grows, the ladder's fighters grow faster (tier: chapter - 1; bosses keep their numbers)
-  kael_hp_per_ch: { value: 15, min: 0, max: 60, step: 1 },
-  kael_dmg_per_ch: { value: 0.12, min: 0, max: 0.5, step: 0.01 },
-  tier_hp: { value: 0.2, min: 0, max: 1, step: 0.02 },
-  tier_dmg: { value: 0.12, min: 0, max: 1, step: 0.02 },
+  kael_hp_per_ch: { value: 12, min: 0, max: 60, step: 1 },
+  kael_dmg_per_ch: { value: 0.1, min: 0, max: 0.5, step: 0.01 },
+  tier_hp: { value: 0.16, min: 0, max: 1, step: 0.02 },
+  tier_dmg: { value: 0.1, min: 0, max: 1, step: 0.02 },
   tier_speed: { value: 0.06, min: 0, max: 0.4, step: 0.01 },
   tier_think: { value: 0.1, min: 0, max: 0.3, step: 0.01 },           // shorter pauses between strings
   tier_windup: { value: 0.05, min: 0, max: 0.2, step: 0.01 },         // quicker tells
@@ -433,11 +435,11 @@ window.CONFIG = {
   // ---- The five gods (iteration 10): Thần Lực spent per spell, each with a cooldown, unlocked by fight
   divine_per_hit: { value: 1.5, min: 0, max: 15, step: 0.5 },         // Thần Lực per blade hit (heavy and spin 1.6x)
   divine_regen: { value: 0.2, min: 0, max: 10, step: 0.1 },           // /s while a fight is on
-  unlock_ignar: { value: 25, min: 1, max: 50, step: 1 },              // Crixus's chariot
-  unlock_fulmen: { value: 15, min: 1, max: 50, step: 1 },             // Sabina
-  unlock_thalassa: { value: 30, min: 1, max: 50, step: 1 },           // Marinus
-  unlock_terrak: { value: 5, min: 1, max: 50, step: 1 },              // the fight whose boss holds the god (Grull); beaten, it is Kael's
-  unlock_nox: { value: 40, min: 1, max: 50, step: 1 },                // Praetor Severus
+  unlock_ignar: { value: 12, min: 1, max: 30, step: 1 },              // Crixus's chariot
+  unlock_fulmen: { value: 10, min: 1, max: 30, step: 1 },             // Sabina
+  unlock_thalassa: { value: 18, min: 1, max: 30, step: 1 },           // Marinus
+  unlock_terrak: { value: 5, min: 1, max: 30, step: 1 },              // the fight whose boss holds the god (Grull); beaten, it is Kael's
+  unlock_nox: { value: 22, min: 1, max: 30, step: 1 },                // Praetor Severus
   ignar_cost: { value: 15, min: 0, max: 100, step: 1 },
   ignar_cd: { value: 18, min: 0, max: 30, step: 0.5 },
   fulmen_cost: { value: 12, min: 0, max: 100, step: 1 },              // bolts on the nearest foes, numb
@@ -500,6 +502,146 @@ window.CONFIG = {
   fire_patch_dmg: { value: 7, min: 0, max: 40, step: 1 },              // each time it catches Kael
   fire_patch_gap: { value: 0.12, min: 0.05, max: 1, step: 0.01 },      // s between patches while it charges
   fire_ring_gap_mult: { value: 2.5, min: 1, max: 10, step: 0.5 },      // sparser fire while it drives the ring
+
+  // ---- The living arena: traps in the sand (iteration 14)
+  traps_on: { value: 1, min: 0, max: 1, step: 1 },                    // traps at all (0: plain sand)
+  trap_from_fight: { value: 3, min: 1, max: 50, step: 1 },            // the first fight with traps
+  trap_spikes_ch1: { value: 2, min: 0, max: 6, step: 1 },             // spike grates per fight, by chapter
+  trap_spikes_ch2: { value: 2, min: 0, max: 6, step: 1 },
+  trap_spikes_ch3: { value: 2, min: 0, max: 6, step: 1 },
+  trap_spikes_ch4: { value: 3, min: 0, max: 6, step: 1 },
+  trap_spikes_ch5: { value: 3, min: 0, max: 6, step: 1 },
+  trap_oil_from_ch: { value: 2, min: 1, max: 5, step: 1 },            // chapter the oil trench comes in
+  trap_blade_from_ch: { value: 3, min: 1, max: 5, step: 1 },          // chapter the blade pillar comes in
+  trap_doors_from_fight: { value: 6, min: 1, max: 51, step: 1 },      // the first fight with trapdoors
+  trap_doors: { value: 2, min: 0, max: 4, step: 1 },                  // trapdoors per fight
+  trap_spike_r: { value: 0.85, min: 0.4, max: 2, step: 0.05 },        // u, half the grate
+  trap_spike_period: { value: 4.5, min: 1.5, max: 12, step: 0.25 },   // s, one rise to the next
+  trap_spike_warn: { value: 0.9, min: 0.2, max: 3, step: 0.05 },      // s the grate glows red first
+  trap_spike_up: { value: 1.2, min: 0.3, max: 4, step: 0.05 },        // s the spikes stay up
+  trap_spike_dmg: { value: 14, min: 0, max: 60, step: 1 },            // to Kael
+  trap_oil_len: { value: 4.5, min: 1.5, max: 9, step: 0.25 },         // u
+  trap_oil_w: { value: 0.9, min: 0.4, max: 2, step: 0.05 },           // u
+  trap_oil_period: { value: 9, min: 3, max: 20, step: 0.5 },          // s, one blaze to the next
+  trap_oil_warn: { value: 1.2, min: 0.3, max: 4, step: 0.1 },         // s of smoke first
+  trap_oil_burn: { value: 3.5, min: 0.5, max: 10, step: 0.25 },       // s it burns
+  trap_oil_tick: { value: 0.5, min: 0.1, max: 2, step: 0.05 },        // s between two burns of one fighter
+  trap_oil_dmg: { value: 5, min: 0, max: 40, step: 1 },               // to Kael, each tick
+  trap_blade_len: { value: 2.4, min: 1, max: 4, step: 0.1 },          // u from the pillar centre to the blade tip
+  trap_blade_speed: { value: 1.8, min: 0.3, max: 6, step: 0.1 },      // rad/s; two blades, opposite
+  trap_blade_dmg: { value: 12, min: 0, max: 60, step: 1 },            // to Kael
+  trap_door_warn: { value: 0.9, min: 0.2, max: 3, step: 0.05 },       // s the hatch rattles before it opens
+  trap_door_open: { value: 3.0, min: 0.5, max: 10, step: 0.25 },      // s it stays open: a pit
+  trap_door_jump: { value: 7, min: 2, max: 14, step: 0.5 },           // u/s up out of the pit
+  trap_pit_r: { value: 0.7, min: 0.3, max: 1.5, step: 0.05 },         // u, how close to the middle of an open hatch to fall
+  trap_pit_dmg: { value: 18, min: 0, max: 80, step: 1 },              // to Kael (he climbs out); a common foe falls and is gone
+  trap_lion_from_ch: { value: 2, min: 1, max: 5, step: 1 },           // chapter a lion can be let up through a hatch
+  trap_lion_every: { value: 3, min: 1, max: 20, step: 1 },            // in every Nth fight with hatches, a lion halfway through the horde
+  trap_lion_hp_mult: { value: 0.4, min: 0.1, max: 1.5, step: 0.05 },  // of a lion fight's lion
+  trap_knock: { value: 7, min: 0, max: 20, step: 0.5 },               // u/s the spikes throw a fighter off
+  trap_foe_mult: { value: 2.0, min: 0.5, max: 5, step: 0.1 },         // traps hurt foes this much more than Kael
+  trap_boss_mult: { value: 0.5, min: 0, max: 2, step: 0.05 },         // and bosses this share of that
+  fame_trap_kill: { value: 6, min: 0, max: 30, step: 1 },             // a foe killed by a trap
+  fame_trap_hit: { value: 2, min: 0, max: 20, step: 1 },              // a foe (not fodder) hurt by a trap
+  knock_heavy: { value: 10, min: 0, max: 30, step: 0.5 },             // u/s a heavy blow throws a foe back (about a tenth of it in u)
+  knock_bash: { value: 12, min: 0, max: 30, step: 0.5 },              // u/s the shield bash
+  knock_spin: { value: 7, min: 0, max: 30, step: 0.5 },               // u/s the spin
+  knock_boss_mult: { value: 0.5, min: 0, max: 2, step: 0.05 },        // bosses are thrown this share
+
+  // ---- Each chapter its own arena (iteration 15)
+  arenas_on: { value: 1, min: 0, max: 1, step: 1 },                   // chapter arenas at all (0: the same sand everywhere)
+  arena_from_fight: { value: 2, min: 1, max: 50, step: 1 },           // the first fight with them (the lesson stays plain)
+  slam_speed: { value: 3, min: 0.5, max: 12, step: 0.25 },            // u/s of a throw at which hitting a stake fence, torch, statue or hull counts
+  slam_dmg: { value: 8, min: 0, max: 40, step: 1 },                   // to whoever is thrown into a torch, statue or hull (foes x trap_foe_mult)
+  stake_dmg: { value: 9, min: 0, max: 40, step: 1 },                  // Hố Cát: thrown into the stake fence
+  mud_count: { value: 3, min: 0, max: 6, step: 1 },                   // Hố Cát: mud patches
+  mud_r: { value: 1.4, min: 0.5, max: 3, step: 0.1 },                 // u
+  mud_slow: { value: 0.55, min: 0.2, max: 1, step: 0.05 },            // speed in the mud
+  torch_light: { value: 14, min: 0, max: 40, step: 0.5 },             // Kinh Đô by night: each torch post's light
+  torch_fire_time: { value: 5, min: 1, max: 15, step: 0.5 },          // s the spilt fire of a fallen torch burns
+  torch_fire_dmg: { value: 6, min: 0, max: 30, step: 1 },             // each tick in it (to Kael; foes x trap_foe_mult)
+  shallow_slow: { value: 0.9, min: 0.5, max: 1, step: 0.02 },         // Colossus flooded: speed in the shallows
+  wave_gap: { value: 10, min: 3, max: 30, step: 0.5 },                // s from one wave to the next
+  wave_first: { value: 6, min: 1, max: 30, step: 0.5 },               // s into the fight before the first
+  wave_warn: { value: 1.4, min: 0.4, max: 4, step: 0.1 },             // s the wave gathers at the wall
+  wave_speed: { value: 7, min: 2, max: 16, step: 0.5 },               // u/s across the sand
+  wave_push: { value: 10, min: 0, max: 30, step: 0.5 },               // u/s it throws a fighter along
+  wave_block_mult: { value: 0.3, min: 0, max: 1, step: 0.05 },        // of the push on Kael with the shield up
+  statue_count: { value: 3, min: 0, max: 6, step: 1 },                // the Emperor's garden: marble statues on the sand
+  statue_dmg: { value: 22, min: 0, max: 80, step: 1 },                // to whoever a toppled statue falls on (foes x trap_foe_mult)
+  statue_len: { value: 2.6, min: 1, max: 4, step: 0.1 },              // u it reaches as it falls
+  gift_fame: { value: 40, min: 0, max: 100, step: 1 },                // Danh Vọng at which the Emperor throws wine down
+  gift_first: { value: 8, min: 1, max: 30, step: 0.5 },               // s into the fight before the first
+  gift_gap: { value: 14, min: 3, max: 40, step: 0.5 },                // s between two
+  gift_heal: { value: 20, min: 0, max: 80, step: 1 },                 // HP a jar gives back
+  gift_life: { value: 9, min: 2, max: 30, step: 0.5 },                // s a jar lies on the sand
+  // Nhật Thực: the sun goes out over each fight of chapter 5, and pools of shadow grow on the sand
+  eclipse_time: { value: 60, min: 10, max: 240, step: 5 },             // s from first light to the sun gone
+  eclipse_dim: { value: 0.6, min: 0, max: 0.95, step: 0.05 },         // how much of the light goes
+  shadow_count: { value: 3, min: 0, max: 6, step: 1 },
+  shadow_r: { value: 1.3, min: 0.5, max: 3, step: 0.1 },              // m, a pool at first light
+  shadow_grow: { value: 1.6, min: 1, max: 3, step: 0.1 },             // its size once the sun is gone
+  shadow_dmg: { value: 3, min: 0, max: 20, step: 1 },                 // Kael in the shadow loses this
+  shadow_tick: { value: 0.6, min: 0.2, max: 3, step: 0.1 },           // s, each this often
+  shadow_heal: { value: 3, min: 0, max: 20, step: 0.5 },              // hp/s a foe in the shadow heals
+  // Tháp Sinh Tử: chapter 6, the three floors Valerian raises out of the arena
+  tower1_horde: { value: 20, min: 0, max: 40, step: 1 },             // shadow fodder rising from the floor of Tầng Máu
+  tower2_horde: { value: 16, min: 0, max: 40, step: 1 },             // and on Tầng Thần, round the idols
+  tower3_horde: { value: 0, min: 0, max: 40, step: 1 },              // on the bridge (the sorcerer calls his own, sorcerer_summon)
+  shade_hp_mult: { value: 0.7, min: 0.1, max: 2, step: 0.05 },       // a shadow of a boss Kael killed: this share of its old health
+  shade_opacity: { value: 0.78, min: 0.2, max: 1, step: 0.02 },      // how solid a shadow looks
+  tower_divine_start: { value: 25, min: 0, max: 100, step: 5 },      // Thần Lực as Tầng Thần begins: the floor drinks the rest
+  idol_hp: { value: 60, min: 1, max: 500, step: 5 },                 // its bar; only its own god's spell breaks it, at once
+  idol_think: { value: 3.2, min: 0.5, max: 15, step: 0.5 },          // s between an idol's spells
+  idol_windup: { value: 1.3, min: 0.3, max: 4, step: 0.1 },          // s its red ring shows before the spell falls
+  idol_dmg: { value: 20, min: 1, max: 60, step: 1 },
+  idol_aoe_r: { value: 1.7, min: 0.5, max: 4, step: 0.1 },           // m
+  idol_divine: { value: 8, min: 0, max: 60, step: 1 },              // Thần Lực back when an idol breaks
+  idol_rage: { value: 0.82, min: 0.4, max: 1, step: 0.02 },          // each idol broken: the others cast this much sooner (×, per idol)
+  tower_horde_at_once: { value: 5, min: 1, max: 12, step: 1 },       // shadows up at once in the tower
+  tower_horde_gap: { value: 1.0, min: 0.2, max: 6, step: 0.1 },      // s between two rising
+  shade_rise_time: { value: 2.6, min: 0.5, max: 10, step: 0.1 },     // s a shadow cut down by a light blow lies before it stands again (once)
+  shade_rise_hp: { value: 0.6, min: 0.1, max: 1, step: 0.05 },       // its share of health when it does
+  shade_rise_fodder: { value: 0.5, min: 0, max: 1, step: 0.05 },     // chance a shadow thug stands again (a fighter's shadow always does)
+  shade_climb: { value: 2.2, min: 0.5, max: 8, step: 0.1 },          // m/s a shadow climbs out of the floor (looks only)
+  tower_pulse_gap: { value: 13, min: 3, max: 60, step: 1 },          // s between Valerian's laughs: the braziers flare red, a taunt
+  tower_blackout: { value: 0.05, min: 0, max: 0.5, step: 0.01 },     // chance a second that a brazier goes out for a moment (looks only)
+  tower_vignette: { value: 0.5, min: 0, max: 1, step: 0.05 },        // the dark round the screen in the tower (looks only)
+  tower_heart_hp: { value: 0.4, min: 0, max: 1, step: 0.05 },        // below this share of health Kael hears his heart, the screen's edge pulses red
+  whisper_gap: { value: 7, min: 2, max: 30, step: 0.5 },             // s between whispers in the tower (sound only)
+  mirror_res: { value: 384, min: 128, max: 1024, step: 64 },         // px, the magic mirrors the crowd watches through (looks only; read at the first tower)
+  sorcerer_hp: { value: 480, min: 50, max: 2000, step: 10 },
+  sorcerer_speed: { value: 3.2, min: 0.5, max: 7, step: 0.1 },
+  sorcerer_think: { value: 0.9, min: 0.2, max: 4, step: 0.05 },
+  sorcerer_recover: { value: 0.5, min: 0, max: 2, step: 0.05 },      // s more after his last move: the window to cut
+  sorcerer_claw_windup: { value: 0.45, min: 0.1, max: 2, step: 0.05 },
+  sorcerer_claw_dmg: { value: 14, min: 1, max: 60, step: 1 },
+  sorcerer_bolt_windup: { value: 0.65, min: 0.1, max: 2, step: 0.05 },
+  sorcerer_bolt_dmg: { value: 13, min: 1, max: 60, step: 1 },        // a dark orb; met with the shield at the right moment it fills the light
+  sorcerer_bolt_speed: { value: 16, min: 4, max: 40, step: 1 },      // m/s the orb is seen to fly
+  sorcerer_nova_windup: { value: 0.95, min: 0.2, max: 3, step: 0.05 },
+  sorcerer_nova_dmg: { value: 24, min: 1, max: 80, step: 1 },
+  sorcerer_nova_r: { value: 3.0, min: 1, max: 6, step: 0.1 },        // m round him
+  sorcerer_pillar_windup: { value: 1.0, min: 0.2, max: 3, step: 0.05 },
+  sorcerer_pillar_dmg: { value: 22, min: 1, max: 80, step: 1 },
+  sorcerer_pillar_r: { value: 1.6, min: 0.5, max: 4, step: 0.1 },    // m, under Kael
+  sorcerer_dark_mult: { value: 0.1, min: 0, max: 1, step: 0.05 },    // what a blade or a spell does to him while the darkness covers him
+  sorcerer_phase2: { value: 0.66, min: 0.1, max: 0.95, step: 0.01 }, // share of health: he rages, a band falls, shadows come
+  sorcerer_phase3: { value: 0.33, min: 0.05, max: 0.9, step: 0.01 }, // and again, with his last strings
+  sorcerer_summon: { value: 3, min: 0, max: 10, step: 1 },           // shadows he calls at each phase
+  light_per_parry: { value: 24, min: 1, max: 100, step: 1 },          // light (of 100) a parry or a deflected orb fills, on the bridge
+  light_nghia_bonus: { value: 0.06, min: 0, max: 0.5, step: 0.01 },   // more per point of Nghĩa: mercy feeds the light
+  light_per_shard: { value: 8, min: 0, max: 30, step: 1 },           // light already there on the bridge, per idol broken on Tầng Thần
+  light_time: { value: 8, min: 1, max: 30, step: 0.5 },              // s the Light Sword burns
+  light_dmg_mult: { value: 1.6, min: 0.5, max: 4, step: 0.05 },      // Kael's blows on him while it burns
+  light_daze: { value: 1.6, min: 0, max: 5, step: 0.1 },             // s he reels, blinded, as it ignites
+  light_glow: { value: 14, min: 0, max: 40, step: 1 },               // the light round Kael while it burns (looks only)
+  bridge_r0: { value: 8.6, min: 4, max: 9, step: 0.1 },              // m, the bridge's ring at first
+  bridge_band: { value: 1.25, min: 0.5, max: 3, step: 0.05 },        // m, each band that falls
+  bridge_min: { value: 3.6, min: 1.5, max: 8, step: 0.1 },           // m, it never shrinks below this
+  bridge_crumble_gap: { value: 25, min: 5, max: 120, step: 1 },      // s between bands falling on their own
+  bridge_warn: { value: 2.5, min: 0.5, max: 8, step: 0.1 },          // s a band glows red before it goes
+  bridge_fall_dmg: { value: 18, min: 0, max: 80, step: 1 },          // Kael caught on a falling band (he climbs back on)
   foe_hp_mult: { value: 1.25, min: 0.5, max: 3, step: 0.05 },          // every foe but the bosses
   boss_hp_mult: { value: 1.15, min: 0.5, max: 3, step: 0.05 },
   foe_dmg_mult: { value: 1.2, min: 0.5, max: 3, step: 0.05 },          // every foe's blows, bosses too
@@ -508,6 +650,8 @@ window.CONFIG = {
   horde_ch2: { value: 6, min: 0, max: 30, step: 1 },
   horde_ch3: { value: 8, min: 0, max: 30, step: 1 },
   horde_ch4: { value: 10, min: 0, max: 30, step: 1 },
+  horde_ch5: { value: 12, min: 0, max: 30, step: 1 },
+  horde_ch6: { value: 0, min: 0, max: 30, step: 1 },                  // unused: the tower's floors set their own (tower*_horde)
   horde_at_once: { value: 3, min: 1, max: 10, step: 1 },              // on the sand at once (one more from chapter 3)
   horde_gap: { value: 1.4, min: 0.2, max: 6, step: 0.1 },             // s between two through the gate
   horde_first: { value: 1.2, min: 0, max: 10, step: 0.1 },            // s into the fight before the first
