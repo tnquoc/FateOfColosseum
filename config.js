@@ -29,17 +29,15 @@ window.CONFIG = {
   kael_turn: { value: 12, min: 2, max: 30, step: 1 },                 // rad/s, turning to face the foe
   kael_hitstun: { value: 0.35, min: 0, max: 1.5, step: 0.05 },        // s
 
-  // ---- Stamina (from the notes: 100, light 10, heavy 25, roll 20, block 5/s, regen 15/s, winded 1.5 s)
-  stamina_max: { value: 100, min: 20, max: 300, step: 5 },
-  stamina_light: { value: 10, min: 0, max: 50, step: 1 },
-  stamina_heavy: { value: 25, min: 0, max: 80, step: 1 },
-  stamina_roll: { value: 20, min: 0, max: 80, step: 1 },
-  stamina_block_per_s: { value: 5, min: 0, max: 40, step: 1 },
-  stamina_regen: { value: 15, min: 1, max: 80, step: 1 },             // /s when not attacking, rolling or blocking
-  stamina_regen_delay: { value: 0.5, min: 0, max: 2, step: 0.05 },    // s after spending before regen starts
-  winded_time: { value: 1.5, min: 0, max: 4, step: 0.1 },             // s standing to breathe at 0 stamina
-  block_hit_stamina: { value: 8, min: 0, max: 50, step: 1 },          // a normal blow taken on the shield
-  guardbreak_stamina: { value: 30, min: 0, max: 100, step: 1 },       // a red blow taken on the shield
+  // ---- Rhythm (iteration 19: no stamina bar; the brakes on mashing are a heavy's breath, a bash's reset,
+  // rolls that slow when chained, and a shield that breaks under too many blows in a row)
+  heavy_cd: { value: 1.6, min: 0, max: 4, step: 0.05 },              // s from the start of a heavy before the next heavy
+  bash_cd: { value: 0.8, min: 0, max: 3, step: 0.05 },               // s from the start of a bash before the next bash
+  roll_rest: { value: 0.12, min: 0, max: 1, step: 0.01 },            // s after a roll before the next one
+  roll_rest_step: { value: 0.22, min: 0, max: 1, step: 0.01 },       // added per roll already in the chain
+  roll_rest_max: { value: 0.9, min: 0, max: 2, step: 0.05 },         // the longest wait between chained rolls
+  guard_break_hits: { value: 5, min: 1, max: 20, step: 1 },          // blows taken on the shield in a row before it breaks
+  guard_hit_window: { value: 2.5, min: 0.5, max: 8, step: 0.1 },     // s: a blow after this long starts the count again
   guardbreak_time: { value: 0.7, min: 0, max: 2, step: 0.05 },        // s Kael reels after his guard breaks
   guardbreak_damage: { value: 0.5, min: 0, max: 1, step: 0.05 },      // share of a red blow that gets through the shield
 
@@ -425,7 +423,6 @@ window.CONFIG = {
   bash_dmg: { value: 6, min: 0, max: 40, step: 1 },
   bash_lunge: { value: 0.9, min: 0, max: 3, step: 0.1 },
   bash_stun: { value: 0.9, min: 0.2, max: 3, step: 0.05 },            // s the foe reels; a shield breaks
-  stamina_bash: { value: 12, min: 0, max: 60, step: 1 },
   exec_hp: { value: 0.25, min: 0, max: 0.6, step: 0.01 },             // a heavy, lunge or bash on a reeling foe left under this share of its health finishes it
   exec_slow: { value: 0.45, min: 0, max: 1.5, step: 0.05 },           // s of slow time on an execution
   fame_exec: { value: 10, min: 0, max: 40, step: 1 },

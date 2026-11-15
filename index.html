@@ -2164,7 +2164,7 @@ function newFighter(kind, vet, tier = 0) {
 function removeFighter(f) { if (!f) return; const fig = FIG.get(f); if (fig) { scene3.remove(fig.root); if (fig.trail) scene3.remove(fig.trail); } }
 function newKael() {
   const k = newFighter('kael');
-  Object.assign(k, { stamina: tune.stamina_max, staDelay: 0, windedPending: false, blockAge: 9, holding: false, holdT: 0, holdFired: false,
+  Object.assign(k, { heavyCd: 0, bashCd: 0, rollRest: 0, guardHits: 0, guardHitT: -9, blockAge: 9, holding: false, holdT: 0, holdFired: false,
     queued: null, queuedT: 0, rollBuf: 0, comboStep: 0, comboHits: 0, comboT: 0, rollX: 0, rollZ: 1, lastRollT: -9, rollChain: 0,
     lostHp: false, idleT: 0, moved: 0, dodged: false, maxCombo: 0, qBuf: 0, netT: 0 });
   const fig = FIG.get(k);
@@ -3405,8 +3405,8 @@ function setupFight(i, first) {
   k.maxHp = tune.kael_hp + tune.kael_hp_per_ch * (F.ch - 1);
   if (first) { s.fameAtStart = s.fame; s.divineAtStart = s.divine; } else { s.fame = s.fameAtStart; s.divine = s.divineAtStart; }
   const kf = FIG.get(k);
-  Object.assign(k, { hp: k.maxHp, stamina: tune.stamina_max, state: 'free', t: 0, x: 0, z: 3.4, yaw: Math.PI, move: null, blocking: false,
-    queued: null, rollBuf: 0, comboHits: 0, comboStep: 0, lostHp: false, idleT: 0, windedPending: false, kbx: 0, kbz: 0, flash: 0, moved: 0, netT: 0,
+  Object.assign(k, { hp: k.maxHp, heavyCd: 0, bashCd: 0, rollRest: 0, guardHits: 0, state: 'free', t: 0, x: 0, z: 3.4, yaw: Math.PI, move: null, blocking: false,
+    queued: null, rollBuf: 0, comboHits: 0, comboStep: 0, lostHp: false, idleT: 0, kbx: 0, kbz: 0, flash: 0, moved: 0, netT: 0,
     afterRoll: 0, spellBuf: null, qBuf: 0 });
   k.px = k.x; k.pz = k.z; kf.root.visible = true; cam.yaw = Math.PI; cam.snap = true;
   // a fight with a scene first waits at the gate until the herald calls it in
@@ -4040,10 +4040,8 @@ function updateFame(dt) {
 }
 
 // ---- Kael ------------------------------------------------------------------------------------
-function spend(k, a) {
-  k.stamina -= a; k.staDelay = tune.stamina_regen_delay;
-  if (k.stamina <= 0) { k.stamina = 0; k.windedPending = true; }
-}
+/** No stamina: a heavy needs its breath back, a bash its footing; everything else is free. */
+function canStart(k, type) { return type === 'heavy' ? k.heavyCd <= 0 : type === 'bash' ? k.bashCd <= 0 : true; }
 function kaelMoveDef(type, step) {
   if (type === 'heavy') return { windup: tune.heavy_windup, active: tune.heavy_active, recover: tune.heavy_recover, dmg: tune.heavy_dmg,
     range: tune.heavy_range, arc: tune.heavy_arc, lunge: tune.heavy_lunge, heavy: true, poise: tune.heavy_poise, anim: 'heavy' };
@@ -4059,7 +4057,7 @@ function kaelMoveDef(type, step) {
 function startKaelAttack(k, type) {
   const step = type === 'light' ? (k.comboStep % 4) + 1 : 0;
   k.move = kaelMoveDef(type, step); k.comboStep = type === 'light' ? step : 0;
-  spend(k, type === 'heavy' ? tune.stamina_heavy : type === 'bash' ? tune.stamina_bash : tune.stamina_light);
+  if (type === 'heavy') k.heavyCd = tune.heavy_cd; else if (type === 'bash') k.bashCd = tune.bash_cd;
   k.state = 'attack'; k.t = 0; k.hitDone = false; k.blocking = false; k.queued = null;
 }
 // ---- The five gods: each a spell for Thần Lực, unlocked as the ladder climbs, with its own cooldown --
@@ -4075,7 +4073,7 @@ const GODS = {
   nox: { name: 'NOX', what: 'BÓNG TỐI', n: 5, key: 'Digit5', css: '#6A5AB8', tint: [0.35, 0.28, 0.7], part: 'shadow', unlock: () => tune.unlock_nox, from: 'Severus', bossTell: 'Hắn hoá khói tím rồi hiện ra sau lưng mày: thấy khói là LĂN!', cost: () => tune.nox_cost, cd: () => tune.nox_cd,
     tip: 'hoá bóng ra sau lưng địch đâm lén, cả sân chậm lại.', shout: ['NOX! Bóng tối nuốt chửng!', 'Nó còn chẳng thấy mày đâu!', 'Đâm sau lưng, đẹp!'] },
 };
-const GOD_ORDER = ['terrak', 'fulmen', 'ignar', 'thalassa', 'nox'], GOD_Y = 162, GOD_OPEN_ORDER = () => GOD_ORDER;
+const GOD_ORDER = ['terrak', 'fulmen', 'ignar', 'thalassa', 'nox'], GOD_Y = 136, GOD_OPEN_ORDER = () => GOD_ORDER;
 const godX = g => 40 + (GODS[g].n - 1) * 56;
 const godOpen = g => !!(state.learned && state.learned[g]); // a god is Kael's once he has beaten the boss who held it
 /** The gods won before fight i (0-based): every boss before it beaten. */
@@ -4165,11 +4163,12 @@ function noxBlink(k) {
 function startRoll(k, mx, mz) {
   const l = Math.hypot(mx, mz);
   if (l > 0.15) { k.rollX = mx / l; k.rollZ = mz / l; } else { k.rollX = -Math.sin(k.yaw); k.rollZ = -Math.cos(k.yaw); } // no direction: roll back
-  spend(k, tune.stamina_roll); k.state = 'roll'; k.t = 0; k.rollBuf = 0; k.blocking = false; k.queued = null; k.comboStep = 0; k.dodged = false;
+  k.state = 'roll'; k.t = 0; k.rollBuf = 0; k.blocking = false; k.queued = null; k.comboStep = 0; k.dodged = false;
   sfx('roll'); burst(k.x, 0.1, k.z, 'dust', 5, 1.5, 1.2);
   // rolling again and again: the crowd sees a coward
   if (state.t - k.lastRollT < tune.dodge_chain_window) k.rollChain++; else k.rollChain = 0;
   k.lastRollT = state.t;
+  k.rollRest = Math.min(tune.roll_rest_max, tune.roll_rest + tune.roll_rest_step * k.rollChain);
   if (k.rollChain >= tune.dodge_chain_free && state.phase === 'fight' && tutorialDone) {
     fame(-tune.fame_dodge_spam, '-' + tune.fame_dodge_spam + ' HÈN NHÁT', k.x, k.z);
     say('spam', 'Lăn mãi thế? Đám đông khinh kẻ chạy trốn!', 3, 2, 12);
@@ -4179,6 +4178,7 @@ function updateKael(k, dt) {
   const s = state, e = s.enemy;
   k.t += dt; k.blockAge += dt; if (k.flash > 0) k.flash -= dt * 5; if (k.afterRoll > 0) k.afterRoll -= dt;
   for (const g in s.cd) if (s.cd[g] > 0) s.cd[g] -= dt;
+  if (k.heavyCd > 0) k.heavyCd -= dt; if (k.bashCd > 0) k.bashCd -= dt; if (k.rollRest > 0 && k.state !== 'roll') k.rollRest -= dt;
   if (s.phase === 'fight' && alive(k)) addDivine(tune.divine_regen * dt);
   let mx = 0, mz = 0;
   if (down.has('KeyA') || down.has('ArrowLeft')) mx -= 1;
@@ -4194,7 +4194,7 @@ function updateKael(k, dt) {
   // attack: a tap is light, a hold past heavy_hold is heavy
   if (pressed('KeyJ') && canAct) { k.holding = true; k.holdT = 0; k.holdFired = false; }
   if (k.holding) {
-    if (down.has('KeyJ')) { k.holdT += dt; if (!k.holdFired && k.holdT >= tune.heavy_hold) { k.holdFired = true; k.holding = false; k.queued = 'heavy'; k.queuedT = tune.input_buffer; } }
+    if (down.has('KeyJ')) { k.holdT += dt; if (!k.holdFired && k.holdT >= tune.heavy_hold) { k.holdFired = true; k.holding = false; k.queued = 'heavy'; k.queuedT = tune.input_buffer + Math.max(0, k.heavyCd); } }
     else { k.holding = false; if (!k.holdFired) { k.queued = 'light'; k.queuedT = tune.input_buffer; } }
   }
   if (k.queued) { k.queuedT -= dt; if (k.queuedT <= 0) k.queued = null; }
@@ -4203,7 +4203,7 @@ function updateKael(k, dt) {
     k.netT -= dt;
     if (pressed('Space')) { k.netT -= tune.net_struggle; burst(k.x, 0.6, k.z, 'dust', 2, 1.2, 1); sfx('roll'); }
     if (k.netT <= 0) { k.netT = 0; popup('THOÁT LƯỚI!', k.x, k.z, '#E9DFC8', 22); }
-  } else if (pressed('Space') && canAct) k.rollBuf = tune.input_buffer;
+  } else if (pressed('Space') && canAct) k.rollBuf = tune.input_buffer + Math.max(0, k.rollRest) + (k.state === 'roll' ? tune.roll_time : 0);
   for (const g of GOD_ORDER) { // 1-5 call a god (Q: Ignar)
     if (!canAct || !(pressed(GODS[g].key) || pressed('KeyQ') && g === (qGod() || 'terrak'))) continue;
     const G = GODS[g];
@@ -4221,16 +4221,13 @@ function updateKael(k, dt) {
   k.vx = 0; k.vz = 0;
   switch (k.state) {
     case 'free': {
-      if (k.windedPending) { k.windedPending = false; k.state = 'winded'; k.t = 0; k.blocking = false; sfx('breath');
-        say('winded', 'Thở đi! Vung bừa là hết sức, đứng chết trân đấy!', 3, 2, 10); break; }
-      if (k.rollBuf > 0 && k.stamina > 0) { startRoll(k, mx, mz); break; }
+      if (k.rollBuf > 0 && k.rollRest <= 0) { startRoll(k, mx, mz); break; }
       if (spellReady) { startSpell(k, k.spellBuf); break; }
-      if (k.queued && k.stamina > 0) { // with the shield up a cut is a bash; straight out of a roll it is a lunge
-        startKaelAttack(k, k.queued === 'light' && blockDown ? 'bash' : k.queued === 'light' && k.afterRoll > 0 ? 'dash' : k.queued); break; }
-      k.blocking = blockDown && k.stamina > 0;
-      if (k.blocking) { k.stamina -= tune.stamina_block_per_s * dt; k.staDelay = tune.stamina_regen_delay; if (k.stamina <= 0) { k.stamina = 0; k.windedPending = true; } }
-      else if (k.staDelay > 0) k.staDelay -= dt;
-      else k.stamina = Math.min(tune.stamina_max, k.stamina + tune.stamina_regen * dt);
+      if (k.queued) { // with the shield up a cut is a bash; straight out of a roll it is a lunge
+        const t = k.queued === 'light' && blockDown ? 'bash' : k.queued === 'light' && k.afterRoll > 0 ? 'dash' : k.queued;
+        if (canStart(k, t)) { startKaelAttack(k, t); break; }
+      }
+      k.blocking = blockDown;
       const sp = s.phase === 'won' ? 0 : (k.blocking ? tune.kael_block_speed : tune.kael_speed) * (k.netT > 0 ? tune.net_tangle_speed : 1);
       k.vx = mx * sp; k.vz = mz * sp;
       if (face === null && ml > 0.15) face = Math.atan2(mx, mz);
@@ -4253,8 +4250,8 @@ function updateKael(k, dt) {
       const rec = T - m.windup - m.active;
       if (rec >= 0) {
         if (spellReady && !m.magic && rec >= m.recover * tune.cancel_frac) { startSpell(k, k.spellBuf); break; }
-        if (k.queued && k.stamina > 0 && rec >= m.recover * tune.chain_frac && (k.queued === 'heavy' || (m.step && m.step < 4))) { startKaelAttack(k, k.queued); break; }
-        if (k.rollBuf > 0 && k.stamina > 0 && rec >= m.recover * tune.cancel_frac) { startRoll(k, mx, mz); break; }
+        if (k.queued && canStart(k, k.queued) && rec >= m.recover * tune.chain_frac && (k.queued === 'heavy' || (m.step && m.step < 4))) { startKaelAttack(k, k.queued); break; }
+        if (k.rollBuf > 0 && k.rollRest <= 0 && rec >= m.recover * tune.cancel_frac) { startRoll(k, mx, mz); break; }
         if (rec >= m.recover) { k.state = 'free'; k.t = 0; k.move = null; if (!k.queued) k.comboStep = 0; }
       }
       break;
@@ -4262,17 +4259,16 @@ function updateKael(k, dt) {
     case 'roll': {
       const sp = tune.roll_dist / tune.roll_time;
       k.vx = k.rollX * sp; k.vz = k.rollZ * sp; k.idleT = 0;
-      if (k.queued === 'light' && k.t >= tune.roll_time * tune.dash_from && k.stamina > 0) { startKaelAttack(k, 'dash'); break; } // out of the roll into a lunge
+      if (k.queued === 'light' && k.t >= tune.roll_time * tune.dash_from) { startKaelAttack(k, 'dash'); break; } // out of the roll into a lunge
       if (k.t >= tune.roll_time) { k.state = 'free'; k.t = 0; k.afterRoll = tune.dash_window; }
       break;
     }
     case 'hitstun': if (k.t >= tune.kael_hitstun) { k.state = 'free'; k.t = 0; } break;
     case 'guardbreak': if (k.t >= tune.guardbreak_time) { k.state = 'free'; k.t = 0; } break;
-    case 'winded': k.idleT = 0; if (k.t >= tune.winded_time) { k.state = 'free'; k.t = 0; k.stamina = Math.max(k.stamina, tune.stamina_max * 0.25); } break;
+    case 'winded': k.state = 'free'; k.t = 0; break; // no stamina any more: never winded
     case 'victory': case 'sheathe': case 'dead': break;
   }
   if (k.state !== 'free' && k.state !== 'attack') k.blocking = false;
-  if (k.state === 'free' && !k.blocking && k.stamina < 25) say('lowsta', 'Coi chừng thể lực! Ngừng tay một chút là hồi.', 3, 1, 25);
 }
 function kaelStrike(k) {
   const m = k.move;
@@ -4421,18 +4417,23 @@ function blowOnKael(e, m) {
   if (guarding && k.blockAge <= tune.parry_window) { if (m.ranged) deflectArrow(e, k); else parry(e, k); return; }
   if (guarding && k.blocking) {
     if (m.red) {
-      spend(k, tune.guardbreak_stamina); k.state = 'guardbreak'; k.t = 0;
+      k.state = 'guardbreak'; k.t = 0; k.guardHits = 0;
       popup('VỠ THẾ!', k.x, k.z, '#C9C2B4'); sfx('clang');
       hurtKael(m.dmg * tune.guardbreak_damage, e, m.knock || 2, true);
       say('redblock', 'Loé đỏ thì đừng đỡ thường! Lăn, hoặc phản thật đúng lúc!', 3.5, 2, 12);
       if (s.fight === 0 && !tutorialDone && tut.step === 2) tut.result = 'hit';
       return;
     }
-    spend(k, tune.block_hit_stamina); sfx('clang'); burst((e.x + k.x) / 2, 1.1, (e.z + k.z) / 2, 'spark', 5, 3);
+    k.guardHits = state.t - k.guardHitT < tune.guard_hit_window ? k.guardHits + 1 : 1; k.guardHitT = state.t;
+    sfx('clang'); burst((e.x + k.x) / 2, 1.1, (e.z + k.z) / 2, 'spark', 5, 3);
     const d = Math.hypot(k.x - e.x, k.z - e.z) || 1; k.kbx = (k.x - e.x) / d * 1.8; k.kbz = (k.z - e.z) / d * 1.8;
     hitstop = tune.hit_hitstop * 0.6; events.push({ type: 'block' });
     if (s.fight === 0 && !tutorialDone && tut.step === 3) tut.result = 'blocked';
-    if (k.stamina <= 0) { k.state = 'guardbreak'; k.t = 0; k.blocking = false; }
+    if (k.guardHits >= tune.guard_break_hits) { // a shield held under a rain of blows gives way
+      k.state = 'guardbreak'; k.t = 0; k.blocking = false; k.guardHits = 0;
+      popup('KHIÊN VỠ!', k.x, k.z, '#C9C2B4'); sfx('bigHit');
+      say('turtle', 'Núp mãi sau khiên thì khiên cũng vỡ! Lăn ra, hoặc phản đúng lúc!', 3.5, 2, 15);
+    }
     return;
   }
   hurtKael(m.dmg, e, m.knock || 1.6, false);
@@ -5191,14 +5192,11 @@ function drawHUD() {
   // Kael
   textO('KAEL', 24, 22, 20, '#F4EBD0', 'left', SERIF);
   bar(24, 38, 300, 16, k.hp / k.maxHp, k.flash > 0 ? '#E8D8C8' : '#A6402F');
-  const winded = k.state === 'winded';
-  bar(24, 62, 300, 10, k.stamina / tune.stamina_max, winded ? (Math.sin(vt * 20) > 0 ? '#7A7266' : '#D8CFA8') : '#D8CFA8');
-  textO(winded ? 'HẾT SỨC: ĐANG THỞ' : 'THỂ LỰC', 24, 88, 16, winded ? '#E9DFC8' : '#C9C2B4', 'left');
   // Thần Lực: Ignar's fire, filled by the crowd
   const full = s.divine >= 100, pulse = Math.sin(vt * 14) > 0;
-  flameIcon(34, 114, 11, full ? 1 : 0.55 + 0.45 * s.divine / 100);
-  bar(52, 109, 220, 10, s.divine / 100, full && pulse ? '#F08A4B' : '#D85A30', 'rgba(28,20,13,0.85)', full ? '#F08A4B' : '#A8743A');
-  textO(`THẦN LỰC ${Math.floor(s.divine)}` + (isTouch ? ' · CHẠM THẦN' : ' · PHÍM 1–5'), 52, 134, 15, full ? '#F4B27A' : '#C9C2B4', 'left');
+  flameIcon(34, 88, 11, full ? 1 : 0.55 + 0.45 * s.divine / 100);
+  bar(52, 83, 220, 10, s.divine / 100, full && pulse ? '#F08A4B' : '#D85A30', 'rgba(28,20,13,0.85)', full ? '#F08A4B' : '#A8743A');
+  textO(`THẦN LỰC ${Math.floor(s.divine)}` + (isTouch ? ' · CHẠM THẦN' : ' · PHÍM 1–5'), 52, 108, 15, full ? '#F4B27A' : '#C9C2B4', 'left');
   for (const g of GOD_OPEN_ORDER()) { // the gods: a key, a colour; dark until a god notices Kael; a sweep while it recovers
     const G = GODS[g], x = godX(g), y = GOD_Y, r = 18, open = godOpen(g), cdu = s.cd[g] > 0 ? s.cd[g] / G.cd() : 0, ok = godReady(g);
     ctx.globalAlpha = open ? 1 : 0.4;
@@ -5212,13 +5210,13 @@ function drawHUD() {
     ctx.globalAlpha = 1;
   }
   // the purse: what Kael keeps, towards the freedom price
-  ctx.fillStyle = '#E8B830'; ctx.beginPath(); ctx.arc(34, 218, 8, 0, TAU); ctx.fill(); ctx.strokeStyle = '#8A6A20'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(34, 218, 5, 0, TAU); ctx.stroke();
-  textO(`${s.purse.toLocaleString('vi-VN')} / ${tune.freedom_price.toLocaleString('vi-VN')} DENARII`, 50, 219, 15, s.purse >= tune.freedom_price ? '#BFD8C0' : '#F2C94C', 'left');
+  ctx.fillStyle = '#E8B830'; ctx.beginPath(); ctx.arc(34, 192, 8, 0, TAU); ctx.fill(); ctx.strokeStyle = '#8A6A20'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(34, 192, 5, 0, TAU); ctx.stroke();
+  textO(`${s.purse.toLocaleString('vi-VN')} / ${tune.freedom_price.toLocaleString('vi-VN')} DENARII`, 50, 193, 15, s.purse >= tune.freedom_price ? '#BFD8C0' : '#F2C94C', 'left');
   const Ft = FIGHTS[s.fight];
   if (Ft.tower === 2 || Ft.tower === 3) { // the father's hilt: the gods' light won back on Tầng Thần; on the bridge, the Light Sword
     const lit = s.lightT > 0, u = Ft.tower === 2 ? (s.blade || 0) / 5 : lit ? s.lightT / tune.light_time : (s.light || 0) / 100;
-    bar(24, 238, 300, 12, u, lit ? (Math.sin(vt * 16) > 0 ? '#FFF0B0' : '#F6D66A') : '#E9C46A', 'rgba(28,20,13,0.85)', lit ? '#FFF0B0' : '#A8743A');
-    textO(Ft.tower === 2 ? `CHUÔI KIẾM CỦA CHA · ÁNH SÁNG ${s.blade || 0}/5` : lit ? `THÁNH KIẾM BỪNG SÁNG ${Math.ceil(s.lightT)}s` : `ÁNH SÁNG ${Math.floor(s.light || 0)}/100 · PHẢN ĐÒN ĐỂ NẠP`, 24, 264, 15, lit ? '#FFF0B0' : '#E9DFC8', 'left');
+    bar(24, 212, 300, 12, u, lit ? (Math.sin(vt * 16) > 0 ? '#FFF0B0' : '#F6D66A') : '#E9C46A', 'rgba(28,20,13,0.85)', lit ? '#FFF0B0' : '#A8743A');
+    textO(Ft.tower === 2 ? `CHUÔI KIẾM CỦA CHA · ÁNH SÁNG ${s.blade || 0}/5` : lit ? `THÁNH KIẾM BỪNG SÁNG ${Math.ceil(s.lightT)}s` : `ÁNH SÁNG ${Math.floor(s.light || 0)}/100 · PHẢN ĐÒN ĐỂ NẠP`, 24, 238, 15, lit ? '#FFF0B0' : '#E9DFC8', 'left');
   }
   // Danh Vọng
   const fx = 440, fw = 400;
